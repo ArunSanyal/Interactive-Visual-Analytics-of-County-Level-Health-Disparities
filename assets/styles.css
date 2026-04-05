@@ -1,0 +1,320 @@
+/* ==========================================================================
+   County Health Disparities Explorer – Global Styles
+   ========================================================================== */
+
+:root {
+  --bg-deep:      #0d1117;
+  --bg-panel:     #161b27;
+  --bg-card:      #1e2436;
+  --bg-sidebar:   #131720;
+  --border:       rgba(255,255,255,0.08);
+  --text:         #dee2e6;
+  --text-muted:   #6c7a96;
+  --accent:       #4cc9f0;
+  --accent-warm:  #f4a261;
+  --danger:       #e63946;
+  --radius:       10px;
+  --radius-sm:    6px;
+  --shadow:       0 4px 24px rgba(0,0,0,0.45);
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  background-color: var(--bg-deep) !important;
+  color: var(--text) !important;
+  font-family: 'Inter', system-ui, sans-serif !important;
+  font-size: 13.5px;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-deep); }
+::-webkit-scrollbar-thumb { background: #2d3555; border-radius: 3px; }
+
+/* ============================================================
+   HOME PAGE
+   ============================================================ */
+
+.home-page { min-height: 100vh; background: var(--bg-deep); }
+
+/* Hero */
+.hero-section {
+  min-height: 65vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 20% 60%, rgba(76,201,240,0.10) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 30%, rgba(99,110,250,0.10) 0%, transparent 60%),
+    var(--bg-deep);
+  padding: 5rem 2rem;
+}
+
+.hero-content { max-width: 700px; }
+
+.hero-badge {
+  display: inline-block;
+  padding: 4px 16px;
+  border-radius: 20px;
+  background: rgba(76,201,240,0.10);
+  border: 1px solid rgba(76,201,240,0.30);
+}
+
+.hero-badge .badge-text {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.hero-title {
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  font-weight: 700;
+  line-height: 1.15;
+  color: #f1f3f5;
+  letter-spacing: -0.02em;
+}
+
+.hero-subtitle {
+  font-size: 1.05rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  max-width: 580px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.hero-btn {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 50px !important;
+  background: linear-gradient(135deg, #4cc9f0, #6366f1) !important;
+  border: none !important;
+  box-shadow: 0 4px 20px rgba(76,201,240,0.30);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.hero-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(76,201,240,0.45);
+}
+
+/* Feature cards */
+.feature-section { background: var(--bg-deep); }
+.feature-section h2 { color: #f1f3f5; }
+
+.feature-card {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  transition: transform 0.2s, border-color 0.2s;
+}
+.feature-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(76,201,240,0.35) !important;
+}
+
+.feature-icon {
+  display: block;
+  font-size: 1.8rem;
+  color: var(--accent);
+}
+
+/* Footer */
+.footer { background: var(--bg-panel); }
+
+
+/* ============================================================
+   VIZ PAGE
+   ============================================================ */
+
+.viz-page { min-height: 100vh; background: var(--bg-deep); }
+.viz-container { padding: 10px 12px !important; }
+
+/* ── Sidebar ──────────────────────────────────────────────── */
+.sidebar {
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  min-height: calc(100vh - 56px);
+}
+
+.sidebar-inner {
+  padding: 14px 12px;
+  position: sticky;
+  top: 56px;
+  overflow-y: auto;
+  max-height: calc(100vh - 70px);
+}
+
+.sidebar-section-title {
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.10em;
+  color: var(--text-muted) !important;
+  text-transform: uppercase;
+  margin-bottom: 10px !important;
+  margin-top: 6px;
+}
+
+.ctrl-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.divider {
+  border-color: var(--border) !important;
+  margin: 12px 0 !important;
+}
+
+.selection-info {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 11px;
+}
+
+/* ── Panels ───────────────────────────────────────────────── */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.30);
+}
+
+.panel-header {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.025);
+  min-height: 36px;
+}
+
+.panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c9d1d9;
+  letter-spacing: 0.01em;
+}
+
+.badge-sm { font-size: 9px !important; }
+
+/* ── Bottom chart row ─────────────────────────────────────── */
+.bottom-panel { height: auto; }
+
+/* ── Details panel ────────────────────────────────────────── */
+.details-panel { min-height: 72px; }
+.details-content { padding: 10px 16px; }
+
+.detail-county-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e9ecef;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+}
+
+.detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px 24px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  padding: 2px 0;
+}
+
+.detail-label { color: var(--text-muted); }
+.detail-value { font-weight: 500; color: #e9ecef; }
+
+/* ── Plotly Dash overrides ────────────────────────────────── */
+.js-plotly-plot .plotly .modebar {
+  background: transparent !important;
+}
+
+/* Dropdown styling */
+.dash-dropdown .Select-control {
+  background: var(--bg-card) !important;
+  border-color: var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--text) !important;
+  font-size: 12px;
+}
+.dash-dropdown .Select-menu-outer {
+  background: var(--bg-card) !important;
+  border-color: rgba(255,255,255,0.15) !important;
+  z-index: 9999 !important;
+}
+.dash-dropdown .Select-option {
+  background: var(--bg-card) !important;
+  color: var(--text) !important;
+  font-size: 12px;
+}
+.dash-dropdown .Select-option:hover,
+.dash-dropdown .Select-option.is-focused {
+  background: rgba(76,201,240,0.12) !important;
+}
+.dash-dropdown .Select-value-label { color: var(--text) !important; }
+.dash-dropdown .Select-arrow { border-top-color: var(--text-muted) !important; }
+
+/* Radio items */
+.form-check-input:checked { background-color: var(--accent) !important; border-color: var(--accent) !important; }
+.form-check-label { font-size: 12px; color: var(--text); }
+
+/* Slider */
+.rc-slider-track { background-color: var(--accent) !important; }
+.rc-slider-handle { border-color: var(--accent) !important; }
+.rc-slider-dot-active { border-color: var(--accent) !important; }
+
+/* Navbar */
+.navbar { background: rgba(13,17,23,0.95) !important; backdrop-filter: blur(8px); }
+
+/* Alerts */
+.alert { border-radius: var(--radius) !important; }
+
+/* Loading spinner overlay */
+._dash-loading { opacity: 0.6; }
+
+/* Graph containers */
+.js-plotly-plot { width: 100% !important; }
+
+/* ── Parallel coordinates county label strip ─────────────────────────────── */
+.parcoords-county-label {
+  padding: 6px 12px 8px;
+  min-height: 30px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+}
+.parcoords-county-heading {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+  margin-right: 2px;
+}
+.parcoords-county-chip {
+  background: rgba(76,201,240,0.10);
+  border: 1px solid rgba(76,201,240,0.30);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.parcoords-county-more {
+  background: rgba(244,162,97,0.10);
+  border-color: rgba(244,162,97,0.30);
+  color: var(--accent-warm);
+}
