@@ -54,6 +54,8 @@ def _build_classifier(values_arr: np.ndarray, method: str, k: int):
         elif method == "equal_interval":
             return mc.EqualInterval(values_arr, k=k)
         elif method == "natural_breaks":
+            # Jenks, G.F. (1967). "The Data Model Concept in Statistical Mapping."
+            # International Yearbook of Cartography, 7, 186-190.
             return mc.NaturalBreaks(values_arr, k=k)
         elif method == "std_mean":
             clf = mc.StdMean(values_arr)

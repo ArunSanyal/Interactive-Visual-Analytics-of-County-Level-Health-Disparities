@@ -22,6 +22,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import plotly.colors as pc
+from scipy import stats as _stats
 
 from src.config import (
     METRICS,
@@ -34,12 +35,14 @@ from src.classify import ClassifyResult, discrete_colorscale
 
 
 # ── Shared style constants ────────────────────────────────────────────────────
-_BG         = "rgba(0,0,0,0)"
-_PANEL_BG   = "#1e2130"
-_GRID_COLOR = "rgba(255,255,255,0.08)"
-_TEXT_COLOR = "#dee2e6"
-_FONT       = dict(family="Inter, sans-serif", color=_TEXT_COLOR, size=12)
+_BG           = "rgba(0,0,0,0)"
+_PANEL_BG     = "#16213e"
+_GRID_COLOR   = "rgba(255,255,255,0.07)"
+_TEXT_COLOR   = "#e0e0e0"
+_FONT         = dict(family="Inter, sans-serif", color=_TEXT_COLOR, size=12)
 _MAPBOX_STYLE = "carto-darkmatter"
+# YlOrRd: perceptually uniform, colorblind-accessible sequential scale for health data.
+# Matches public health convention (CDC, County Health Rankings). See Slocum et al. Ch. 10.
 
 
 def _colorscale_for_metric(metric: str) -> str:
@@ -210,6 +213,7 @@ def make_hex_map(
     result: ClassifyResult,
     center: dict | None = None,
     zoom: float = 3.0,
+    resolution: int = 4,
 ) -> go.Figure:
     """H3 hex choropleth coloured by mean metric value per hex."""
     if hex_df.empty or not hex_geojson.get("features"):
@@ -235,6 +239,9 @@ def make_hex_map(
         axis=1,
     )
 
+    n_tiles    = len(hex_df)
+    n_counties = int(hex_df["count"].sum())
+
     fig = go.Figure(go.Choroplethmapbox(
         geojson=hex_geojson,
         locations=hex_df["h3_index"],
@@ -243,9 +250,9 @@ def make_hex_map(
         colorscale=cs,
         zmin=1,
         zmax=k,
-        marker_opacity=0.78,
-        marker_line_width=0.5,
-        marker_line_color="rgba(255,255,255,0.2)",
+        marker_opacity=0.82,
+        marker_line_width=1.0,
+        marker_line_color="#1a1a2e",
         text=hex_df["_label"],
         hoverinfo="text",
         showscale=True,
@@ -253,7 +260,7 @@ def make_hex_map(
             title=dict(text=f"Class<br>(1–{k})", font=dict(size=11, color=_TEXT_COLOR)),
             tickvals=list(range(1, k + 1)),
             ticktext=[f"C{i}" for i in range(1, k + 1)],
-            bgcolor="rgba(30,33,48,0.85)",
+            bgcolor="rgba(22,33,62,0.90)",
             outlinewidth=0,
             thickness=12,
             len=0.6,
@@ -261,6 +268,17 @@ def make_hex_map(
             tickfont=dict(color=_TEXT_COLOR, size=10),
         ),
     ))
+
+    fig.add_annotation(
+        text=f"{n_tiles} tiles · {n_counties} counties · mean per tile · H3 res {resolution}",
+        xref="paper", yref="paper",
+        x=0.01, y=0.01,
+        xanchor="left", yanchor="bottom",
+        showarrow=False,
+        font=dict(size=10, color="rgba(224,224,224,0.75)"),
+        bgcolor="rgba(0,0,0,0.45)",
+        borderpad=4,
+    )
 
     _center = center or {"lat": 38.5, "lon": -96.0}
     fig.update_layout(
@@ -366,6 +384,7 @@ def make_scatter(
     x_metric: str,
     y_metric: str,
     selected_geoids: list[str] | None = None,
+    color_by_state: bool = False,
 ) -> go.Figure:
     """Bivariate scatter; selected counties highlighted in a contrasting colour."""
     cols_needed = ["GEOID", "State", "County", x_metric, y_metric]
@@ -387,32 +406,50 @@ def make_scatter(
 
     fig = go.Figure()
 
-    # Background dots — very faded when a selection exists, normal otherwise
-    if sel_set:
-        dot_color = "rgba(140,150,170,0.12)"
-        dot_size  = 4
+    _ht = (
+        "<b>%{text}</b><br>"
+        f"{x_label}: %{{x:.3f}}<br>"
+        f"{y_label}: %{{y:.3f}}<extra></extra>"
+    )
+
+    if color_by_state and "State" in unsel.columns:
+        _palette = pc.qualitative.Alphabet
+        _states  = sorted(unsel["State"].dropna().unique())
+        _s2c     = {s: _palette[i % len(_palette)] for i, s in enumerate(_states)}
+        _fade    = 0.25 if sel_set else 0.70
+        for st in _states:
+            _sdf = unsel[unsel["State"] == st]
+            if _sdf.empty:
+                continue
+            fig.add_trace(go.Scatter(
+                x=_sdf[x_metric] if x_metric in _sdf.columns else [],
+                y=_sdf[y_metric] if y_metric in _sdf.columns else [],
+                mode="markers",
+                name=st,
+                marker=dict(color=_s2c[st], size=4 if sel_set else 5,
+                            opacity=_fade, line=dict(width=0)),
+                text=_sdf.apply(_county_label, axis=1),
+                customdata=_sdf[["GEOID"]].values,
+                hovertemplate=_ht,
+                legendgroup=st,
+            ))
     else:
-        dot_color = "rgba(99,110,250,0.50)"
-        dot_size  = 5
+        dot_color = "rgba(140,150,170,0.12)" if sel_set else "rgba(99,110,250,0.50)"
+        dot_size  = 4 if sel_set else 5
+        fig.add_trace(go.Scatter(
+            x=unsel[x_metric] if x_metric in unsel.columns else [],
+            y=unsel[y_metric] if y_metric in unsel.columns else [],
+            mode="markers",
+            marker=dict(color=dot_color, size=dot_size, line=dict(width=0)),
+            name="All Counties",
+            text=unsel.apply(_county_label, axis=1) if not unsel.empty else [],
+            customdata=unsel[["GEOID"]].values if not unsel.empty else [],
+            hovertemplate=_ht,
+            selected=dict(marker=dict(color="#e94560", size=9, opacity=1)),
+            unselected=dict(marker=dict(opacity=0.12)),
+        ))
 
-    fig.add_trace(go.Scatter(
-        x=unsel[x_metric] if x_metric in unsel.columns else [],
-        y=unsel[y_metric] if y_metric in unsel.columns else [],
-        mode="markers",
-        marker=dict(color=dot_color, size=dot_size, line=dict(width=0)),
-        name="All Counties",
-        text=unsel.apply(_county_label, axis=1) if not unsel.empty else [],
-        customdata=unsel[["GEOID"]].values if not unsel.empty else [],
-        hovertemplate=(
-            "<b>%{text}</b><br>"
-            f"{x_label}: %{{x:.3f}}<br>"
-            f"{y_label}: %{{y:.3f}}<extra></extra>"
-        ),
-        selected=dict(marker=dict(color="#f4a261", size=9, opacity=1)),
-        unselected=dict(marker=dict(opacity=0.12)),
-    ))
-
-    # Selected — bold orange dots + county name labels (shown when ≤ 30 selected)
+    # Selected counties — bold highlight on top
     if not sel.empty:
         show_labels = len(sel) <= 30
         sel_labels  = sel.apply(_county_label, axis=1) if show_labels else sel.apply(lambda r: "", axis=1)
@@ -420,23 +457,37 @@ def make_scatter(
             x=sel[x_metric],
             y=sel[y_metric],
             mode="markers+text" if show_labels else "markers",
-            marker=dict(
-                color="#f4a261",
-                size=12,
-                line=dict(width=2, color="#ffffff"),
-                symbol="circle",
-            ),
+            marker=dict(color="#e94560", size=12, line=dict(width=2, color="#ffffff"), symbol="circle"),
             name="Selected",
             text=sel_labels,
             textposition="top center",
-            textfont=dict(size=9, color="#f4a261"),
+            textfont=dict(size=9, color="#e94560"),
             customdata=sel[["GEOID"]].values,
             hovertemplate=(
                 "<b>%{text}</b> ✓<br>"
                 f"{x_label}: %{{x:.3f}}<br>"
                 f"{y_label}: %{{y:.3f}}<extra></extra>"
             ),
+            showlegend=not color_by_state,
         ))
+
+    # Pearson r annotation — supports visual hypothesis testing (Wickham et al. 2010)
+    _x_vals = plot_df[x_metric] if x_metric in plot_df.columns else pd.Series([], dtype=float)
+    _y_vals = plot_df[y_metric] if y_metric in plot_df.columns else pd.Series([], dtype=float)
+    _valid  = _x_vals.notna() & _y_vals.notna()
+    if _valid.sum() >= 2:
+        r_val, p_val = _stats.pearsonr(_x_vals[_valid], _y_vals[_valid])
+        p_str = "p < 0.001" if p_val < 0.001 else f"p = {p_val:.3f}"
+        fig.add_annotation(
+            text=f"r = {r_val:.3f},  {p_str}",
+            xref="paper", yref="paper",
+            x=0.02, y=0.97,
+            xanchor="left", yanchor="top",
+            showarrow=False,
+            font=dict(size=12, color="#e0e0e0"),
+            bgcolor="rgba(0,0,0,0.5)",
+            borderpad=5,
+        )
 
     x_short = METRICS.get(x_metric, {}).get("short_label", x_label)
     y_short = METRICS.get(y_metric, {}).get("short_label", y_label)
@@ -455,12 +506,13 @@ def make_scatter(
                 tickfont=dict(size=9),
             ),
             legend=dict(
-                font=dict(size=10, color=_TEXT_COLOR),
-                bgcolor="rgba(22,27,39,0.85)",
+                font=dict(size=9, color=_TEXT_COLOR),
+                bgcolor="rgba(22,33,62,0.85)",
                 bordercolor=_GRID_COLOR,
                 borderwidth=1,
                 x=0.01, y=0.99,
                 xanchor="left", yanchor="top",
+                tracegroupgap=0,
             ),
             dragmode="lasso",
             uirevision="scatter",
@@ -476,6 +528,7 @@ def make_scatter(
 def make_parcoords(
     df: pd.DataFrame,
     selected_geoids: list[str] | None = None,
+    metric: str | None = None,
 ) -> go.Figure:
     """
     Parallel coordinates for PARCOORDS_METRICS.
@@ -500,22 +553,26 @@ def make_parcoords(
     _BG_SAMPLE = 400   # max background lines — keeps render fast
 
     if has_sel:
-        # Draw ONLY the selected counties so they're clearly visible.
         plot_df = full_df[full_df["GEOID"].isin(sel_set)].copy()
         if plot_df.empty:
             plot_df = full_df.sample(min(_BG_SAMPLE, len(full_df)), random_state=42)
-        line_color  = "#4cc9f0"
-        colorscale  = [[0.0, "#4cc9f0"], [1.0, "#4cc9f0"]]
-        cmin, cmax  = 0.0, 1.0
-        line_vals   = [1.0] * len(plot_df)
+        colorscale = [[0.0, "#4cc9f0"], [1.0, "#4cc9f0"]]
+        cmin, cmax = 0.0, 1.0
+        line_vals  = [1.0] * len(plot_df)
     else:
-        # Sample for performance — 400 lines is representative and renders fast
         if len(full_df) > _BG_SAMPLE:
             plot_df = full_df.sample(_BG_SAMPLE, random_state=42)
-        line_color  = "rgba(99,110,250,0.25)"
-        colorscale  = [[0.0, "rgba(99,110,250,0.25)"], [1.0, "rgba(99,110,250,0.25)"]]
-        cmin, cmax  = 0.0, 1.0
-        line_vals   = [0.5] * len(plot_df)
+        # Color lines by the active metric for visual consistency with choropleth
+        if metric and metric in plot_df.columns and full_df[metric].notna().any():
+            _med = float(full_df[metric].median())
+            line_vals  = plot_df[metric].fillna(_med).tolist()
+            colorscale = "YlOrRd"
+            cmin       = float(full_df[metric].quantile(0.02))
+            cmax       = float(full_df[metric].quantile(0.98))
+        else:
+            colorscale = [[0.0, "rgba(99,110,250,0.25)"], [1.0, "rgba(99,110,250,0.25)"]]
+            cmin, cmax = 0.0, 1.0
+            line_vals  = [0.5] * len(plot_df)
 
     dimensions = []
     for m in avail_metrics:

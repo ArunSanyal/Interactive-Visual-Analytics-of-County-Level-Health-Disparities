@@ -3,16 +3,16 @@
    ========================================================================== */
 
 :root {
-  --bg-deep:      #0d1117;
-  --bg-panel:     #161b27;
-  --bg-card:      #1e2436;
-  --bg-sidebar:   #131720;
-  --border:       rgba(255,255,255,0.08);
-  --text:         #dee2e6;
-  --text-muted:   #6c7a96;
+  --bg-deep:      #1a1a2e;
+  --bg-panel:     #16213e;
+  --bg-card:      #1e2a4a;
+  --bg-sidebar:   #16213e;
+  --border:       #0f3460;
+  --text:         #e0e0e0;
+  --text-muted:   #8892a4;
   --accent:       #4cc9f0;
-  --accent-warm:  #f4a261;
-  --danger:       #e63946;
+  --accent-warm:  #e94560;
+  --danger:       #e94560;
   --radius:       10px;
   --radius-sm:    6px;
   --shadow:       0 4px 24px rgba(0,0,0,0.45);
@@ -317,4 +317,22 @@ body {
   background: rgba(244,162,97,0.10);
   border-color: rgba(244,162,97,0.30);
   color: var(--accent-warm);
+}
+
+/* ── Hypothesis card ─────────────────────────────────────────────────────── */
+.hyp-card {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+}
+.hyp-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+.hyp-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.3;
 }

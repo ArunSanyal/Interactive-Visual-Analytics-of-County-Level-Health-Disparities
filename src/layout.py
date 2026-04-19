@@ -104,9 +104,10 @@ def home_layout() -> html.Div:
                     _feature_card("bi-list-columns",   "Parallel Coordinates",
                         "Compare 7 health and socioeconomic variables side by side. "
                         "Selected counties are highlighted in blue."),
-                    _feature_card("bi-hexagon-fill",   "Equal-Area Hex View",
-                        "Toggle to an H3 hex aggregation that gives equal screen area "
-                        "to every hex, mitigating the large-county visual bias."),
+                    _feature_card("bi-hexagon-fill",   "Tile Cartogram (H3)",
+                        "Each county maps to one equal-sized hex tile regardless of land "
+                        "area — states with more counties occupy proportionally more tiles, "
+                        "eliminating geographic area bias."),
                     _feature_card("bi-link-45deg",     "Coordinated Views",
                         "A shared selection store links map, scatter, histogram, and "
                         "parallel coordinates—brush in one, highlight in all."),
@@ -154,8 +155,9 @@ def viz_layout() -> html.Div:
     return html.Div(className="viz-page", children=[
 
         # Shared state stores
-        dcc.Store(id="selection-store", data=[]),
-        dcc.Store(id="hover-store",     data=None),
+        dcc.Store(id="selection-store",             data=[]),
+        dcc.Store(id="hover-store",                 data=None),
+        dcc.Store(id="parcoords-constraints-store", data={}),
 
         # ── Top bar ───────────────────────────────────────────────────────────
         dbc.Navbar(
@@ -180,16 +182,16 @@ def viz_layout() -> html.Div:
             className="border-bottom border-secondary",
         ),
 
-        # ── Main layout: sidebar + center + right ────────────────────────────
+        # ── Main layout: sidebar + content ───────────────────────────────────
         dbc.Container(fluid=True, className="viz-container py-2", children=[
             dbc.Row([
 
-                # ── LEFT: Controls ────────────────────────────────────────────
+                # ── LEFT SIDEBAR ──────────────────────────────────────────────
                 dbc.Col(width=2, className="sidebar pe-0", children=[
                     html.Div(className="sidebar-inner", children=[
-                        html.H6("CONTROLS", className="sidebar-section-title"),
 
-                        # Metric
+                        html.H6("MAP SETTINGS", className="sidebar-section-title"),
+
                         html.Label("Health Metric", className="ctrl-label"),
                         dcc.Dropdown(
                             id="metric-dropdown",
@@ -199,8 +201,7 @@ def viz_layout() -> html.Div:
                             className="dash-dropdown mb-3",
                         ),
 
-                        # Classification method
-                        html.Label("Classification Method", className="ctrl-label"),
+                        html.Label("Classification / Color Encoding", className="ctrl-label"),
                         dcc.Dropdown(
                             id="method-dropdown",
                             options=[{"label": v, "value": k}
@@ -210,7 +211,6 @@ def viz_layout() -> html.Div:
                             className="dash-dropdown mb-3",
                         ),
 
-                        # Number of classes k
                         html.Label("Number of Classes (k)", className="ctrl-label"),
                         dcc.Slider(
                             id="k-slider",
@@ -220,33 +220,43 @@ def viz_layout() -> html.Div:
                             tooltip={"placement": "bottom", "always_visible": False},
                         ),
 
-                        # Map mode toggle
                         html.Label("Map Mode", className="ctrl-label"),
                         dbc.RadioItems(
                             id="map-mode-radio",
                             options=[
-                                {"label": "County Choropleth", "value": "county"},
-                                {"label": "H3 Hex View",       "value": "hex"},
+                                {"label": "County Choropleth",  "value": "county"},
+                                {"label": "Tile Cartogram (H3)", "value": "hex"},
                             ],
                             value="county",
                             className="mb-3",
                             inputClassName="me-1",
                         ),
 
-                        # State filter
+                        html.Hr(className="divider"),
+                        html.H6("FILTER", className="sidebar-section-title"),
+
                         html.Label("State Filter", className="ctrl-label"),
                         dcc.Dropdown(
                             id="state-dropdown",
                             options=_state_options(),
                             value="All",
                             clearable=False,
-                            className="dash-dropdown mb-3",
+                            className="dash-dropdown mb-2",
                         ),
+                        dbc.Button(
+                            [html.I(className="bi bi-x-circle me-1"), "Reset Selection"],
+                            id="reset-btn",
+                            color="secondary",
+                            outline=True,
+                            size="sm",
+                            className="w-100 mb-2",
+                            n_clicks=0,
+                        ),
+                        html.Div(id="selection-info", className="selection-info"),
 
                         html.Hr(className="divider"),
-
-                        # Scatter axis selectors
                         html.H6("SCATTER AXES", className="sidebar-section-title"),
+
                         html.Label("X Axis", className="ctrl-label"),
                         dcc.Dropdown(
                             id="scatter-x-dropdown",
@@ -261,70 +271,81 @@ def viz_layout() -> html.Div:
                             options=_metric_options(),
                             value=DEFAULT_Y,
                             clearable=False,
-                            className="dash-dropdown mb-3",
+                            className="dash-dropdown mb-2",
+                        ),
+                        dbc.Checklist(
+                            id="scatter-color-state",
+                            options=[{"label": "Color by state", "value": "state"}],
+                            value=[],
+                            className="mb-3",
+                            inputClassName="me-1",
                         ),
 
                         html.Hr(className="divider"),
 
-                        # Reset button
-                        dbc.Button(
-                            [html.I(className="bi bi-x-circle me-1"), "Reset Selection"],
-                            id="reset-btn",
-                            color="secondary",
-                            outline=True,
-                            size="sm",
-                            className="w-100 mb-2",
-                            n_clicks=0,
-                        ),
-
-                        # Selection info badge
-                        html.Div(id="selection-info", className="selection-info"),
+                        # Suggested hypotheses panel
+                        dbc.Card([
+                            dbc.CardHeader(
+                                html.Small("Suggested Hypotheses", className="fw-bold text-info"),
+                                className="py-1 px-2",
+                                style={"backgroundColor": "rgba(76,201,240,0.08)"},
+                            ),
+                            dbc.CardBody([
+                                html.P("Does poverty predict premature death?",
+                                       className="hyp-text mb-1"),
+                                html.P("Expect r > 0.5 between Child Poverty & YPLL Rate",
+                                       className="hyp-sub mb-2"),
+                                html.P("Does uninsured rate predict poor health?",
+                                       className="hyp-text mb-1"),
+                                html.P("Expect r > 0.4 between Uninsured & Fair/Poor Health",
+                                       className="hyp-sub mb-2"),
+                                html.P("Do mental & physical health track together?",
+                                       className="hyp-text mb-1"),
+                                html.P("Expect r > 0.6 between Phys. & Ment. Unhealthy Days",
+                                       className="hyp-sub mb-0"),
+                            ], className="p-2"),
+                        ], className="hyp-card mb-2"),
                     ]),
                 ]),
 
-                # ── MAIN: stacked rows ────────────────────────────────────────
+                # ── MAIN CONTENT ──────────────────────────────────────────────
                 dbc.Col(width=10, className="px-2 main-col", children=[
 
-                    # ── ROW 1: Map ────────────────────────────────────────────
-                    html.Div(className="panel map-panel mb-2", children=[
-                        html.Div(className="panel-header d-flex align-items-center", children=[
-                            html.I(className="bi bi-map me-2 text-primary"),
-                            html.Span(id="map-title", className="panel-title fw-semibold"),
-                            dbc.Badge(id="map-mode-badge", color="info", className="ms-2 badge-sm"),
-                        ]),
-                        dcc.Loading(
-                            type="circle",
-                            color="#4cc9f0",
-                            children=dcc.Graph(
-                                id="map-plot",
-                                config={
-                                    "displayModeBar": True,
-                                    "displaylogo": False,
-                                    "modeBarButtonsToRemove": ["select2d"],
-                                    "scrollZoom": True,
-                                },
-                                style={"height": "440px"},
-                            ),
-                        ),
-                    ]),
-
-                    # Details strip
-                    html.Div(className="panel details-panel mb-2", children=[
-                        html.Div(className="panel-header", children=[
-                            html.I(className="bi bi-info-circle me-2 text-info"),
-                            html.Span("County Details — hover map or scatter to inspect", className="panel-title"),
-                        ]),
-                        html.Div(id="details-panel", className="details-content"),
-                    ]),
-
-                    # ── ROW 2: Scatter + Histogram ────────────────────────────
+                    # ── ROW 1: Map + Scatter ──────────────────────────────────
                     dbc.Row([
+                        # Map
                         dbc.Col(width=7, children=[
-                            html.Div(className="panel bottom-panel", children=[
+                            html.Div(className="panel map-panel", children=[
+                                html.Div(className="panel-header d-flex align-items-center", children=[
+                                    html.I(className="bi bi-map me-2 text-primary"),
+                                    html.Span(id="map-title", className="panel-title fw-semibold"),
+                                    dbc.Badge(id="map-mode-badge", color="info", className="ms-2 badge-sm"),
+                                    html.Span(id="map-county-count", className="ms-auto text-muted",
+                                              style={"fontSize": "10px"}),
+                                ]),
+                                dcc.Loading(
+                                    type="circle", color="#4cc9f0",
+                                    children=dcc.Graph(
+                                        id="map-plot",
+                                        config={
+                                            "displayModeBar": True,
+                                            "displaylogo": False,
+                                            "modeBarButtonsToRemove": ["select2d"],
+                                            "scrollZoom": True,
+                                        },
+                                        style={"height": "420px"},
+                                    ),
+                                ),
+                            ]),
+                        ]),
+
+                        # Scatter
+                        dbc.Col(width=5, children=[
+                            html.Div(className="panel", children=[
                                 html.Div(className="panel-header d-flex align-items-center", children=[
                                     html.I(className="bi bi-scatter-chart me-2 text-warning"),
                                     html.Span("Scatter Plot", className="panel-title"),
-                                    html.Small(" — lasso / box-select to highlight counties", className="text-muted ms-2"),
+                                    html.Small(" — lasso/box-select to highlight", className="text-muted ms-2"),
                                 ]),
                                 dcc.Loading(type="dot", color="#4cc9f0", children=
                                     dcc.Graph(
@@ -337,12 +358,44 @@ def viz_layout() -> html.Div:
                                                 "zoomOut2d", "autoScale2d", "resetScale2d",
                                             ],
                                         },
-                                        style={"height": "340px"},
+                                        style={"height": "420px"},
                                     )
                                 ),
                             ]),
                         ]),
-                        dbc.Col(width=5, children=[
+                    ], className="g-2 mb-2"),
+
+                    # ── Details strip ─────────────────────────────────────────
+                    html.Div(className="panel details-panel mb-2", children=[
+                        html.Div(className="panel-header", children=[
+                            html.I(className="bi bi-info-circle me-2 text-info"),
+                            html.Span("County Details — hover map or scatter to inspect",
+                                      className="panel-title"),
+                        ]),
+                        html.Div(id="details-panel", className="details-content"),
+                    ]),
+
+                    # ── ROW 2: Parcoords + Histogram ──────────────────────────
+                    dbc.Row([
+                        dbc.Col(width=8, children=[
+                            html.Div(className="panel bottom-panel", children=[
+                                html.Div(className="panel-header d-flex align-items-center", children=[
+                                    html.I(className="bi bi-list-columns me-2 text-info"),
+                                    html.Span("Parallel Coordinates", className="panel-title"),
+                                    html.Small(" — drag axes to filter · filtered counties highlight on map",
+                                               className="text-muted ms-2"),
+                                ]),
+                                dcc.Loading(type="dot", color="#4cc9f0", children=
+                                    dcc.Graph(
+                                        id="parcoords-plot",
+                                        config={"displayModeBar": False},
+                                        style={"height": "280px"},
+                                    )
+                                ),
+                                html.Div(id="parcoords-county-label", className="parcoords-county-label"),
+                            ]),
+                        ]),
+                        dbc.Col(width=4, children=[
                             html.Div(className="panel bottom-panel", children=[
                                 html.Div(className="panel-header d-flex align-items-center", children=[
                                     html.I(className="bi bi-bar-chart-fill me-2 text-success"),
@@ -353,36 +406,24 @@ def viz_layout() -> html.Div:
                                     dcc.Graph(
                                         id="histogram-plot",
                                         config={"displayModeBar": False},
-                                        style={"height": "340px"},
+                                        style={"height": "280px"},
                                     )
                                 ),
                             ]),
                         ]),
                     ], className="g-2 mb-2"),
 
-                    # ── ROW 3: Parallel Coordinates ───────────────────────────
-                    dbc.Row([
-                        dbc.Col(width=12, children=[
-                            html.Div(className="panel bottom-panel", children=[
-                                html.Div(className="panel-header d-flex align-items-center", children=[
-                                    html.I(className="bi bi-list-columns me-2 text-info"),
-                                    html.Span("Parallel Coordinates", className="panel-title"),
-                                    html.Small(" — all 7 health metrics · selected counties in blue", className="text-muted ms-2"),
-                                ]),
-                                dcc.Loading(type="dot", color="#4cc9f0", children=
-                                    dcc.Graph(
-                                        id="parcoords-plot",
-                                        config={"displayModeBar": False},
-                                        style={"height": "300px"},
-                                    )
-                                ),
-                                html.Div(id="parcoords-county-label", className="parcoords-county-label"),
-                            ]),
-                        ]),
-                    ], className="g-2"),
+                    # ── Tip text ──────────────────────────────────────────────
+                    html.Div(
+                        html.Small(
+                            "Tip: Click map to select counties · Lasso-select on scatter · "
+                            "Drag axes on parallel coordinates to filter",
+                            className="text-muted",
+                        ),
+                        className="text-center py-1",
+                    ),
 
                 ]),
-
             ], className="g-0"),
         ]),
     ])

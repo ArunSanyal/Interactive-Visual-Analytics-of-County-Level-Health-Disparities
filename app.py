@@ -9,6 +9,7 @@ Run:
 Then open  http://127.0.0.1:8050/  in your browser.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -84,14 +85,45 @@ def _classify_filtered(df: pd.DataFrame, metric: str, method: str, k: int) -> _c
     return _cls.classify(series, method, k)
 
 
+def _geoids_from_constraints(constraints: dict, df: pd.DataFrame) -> list:
+    """Return GEOIDs from df whose values satisfy all active parcoords axis constraints.
+
+    constraints: {dim_idx_str: [[lo, hi], ...]}  — accumulated from restyleData events.
+    Dimension indices map positionally to PARCOORDS_METRICS order.
+    """
+    if not constraints or df.empty:
+        return []
+
+    avail_metrics = [m for m in PARCOORDS_METRICS if m in df.columns]
+    mask = pd.Series(True, index=df.index)
+
+    for dim_idx_str, ranges in constraints.items():
+        dim_idx = int(dim_idx_str)
+        if dim_idx >= len(avail_metrics):
+            continue
+        col = avail_metrics[dim_idx]
+        if col not in df.columns:
+            continue
+        # ranges may be [[lo, hi]] or [lo, hi]; normalise to list-of-lists
+        if ranges and not isinstance(ranges[0], (list, tuple)):
+            ranges = [ranges]
+        col_mask = pd.Series(False, index=df.index)
+        for (lo, hi) in ranges:
+            col_mask |= (df[col] >= lo) & (df[col] <= hi)
+        mask &= col_mask
+
+    return df[mask]["GEOID"].astype(str).tolist()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Callback: update map  (fires on metric / method / k / mode / state / selection)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.callback(
-    Output("map-plot",       "figure"),
-    Output("map-title",      "children"),
-    Output("map-mode-badge", "children"),
+    Output("map-plot",          "figure"),
+    Output("map-title",         "children"),
+    Output("map-mode-badge",    "children"),
+    Output("map-county-count",  "children"),
     Input("metric-dropdown",  "value"),
     Input("method-dropdown",  "value"),
     Input("k-slider",         "value"),
@@ -101,7 +133,7 @@ def _classify_filtered(df: pd.DataFrame, metric: str, method: str, k: int) -> _c
 )
 def update_map(metric, method, k, map_mode, state, selected_geoids):
     if _data.load_error():
-        return _figs.make_empty_fig("Run  python scripts/preprocess.py  first."), "No data", ""
+        return _figs.make_empty_fig("Run  python scripts/preprocess.py  first."), "No data", "", ""
 
     metric = metric or DEFAULT_METRIC
     method = method or DEFAULT_METHOD
@@ -111,7 +143,7 @@ def update_map(metric, method, k, map_mode, state, selected_geoids):
     result      = _classify_filtered(df_filtered, metric, method, k)
 
     label      = METRICS.get(metric, {}).get("label", metric)
-    mode_label = "H3 Hex View" if map_mode == "hex" else "County Choropleth"
+    mode_label = "Tile Cartogram (H3)" if map_mode == "hex" else "County Choropleth"
 
     geoid_set    = set(df_filtered["GEOID"].astype(str))
     filt_geojson = _data.filter_geojson(_data.GEOJSON, geoid_set)
@@ -127,7 +159,13 @@ def update_map(metric, method, k, map_mode, state, selected_geoids):
             selected_geoids=selected_geoids or [],
         )
 
-    return map_fig, label, mode_label
+    n_sel   = len(selected_geoids or [])
+    n_total = len(df_filtered)
+    if n_sel:
+        count_text = f"{n_sel} selected / {n_total} counties"
+    else:
+        count_text = f"{n_total} counties"
+    return map_fig, label, mode_label, count_text
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -159,16 +197,17 @@ def update_histogram(metric, method, k, state):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.callback(
-    Output("parcoords-plot", "figure"),
-    Input("state-dropdown",  "value"),
-    Input("selection-store", "data"),
+    Output("parcoords-plot",  "figure"),
+    Input("state-dropdown",   "value"),
+    Input("selection-store",  "data"),
+    Input("metric-dropdown",  "value"),
 )
-def update_parcoords(state, selected_geoids):
+def update_parcoords(state, selected_geoids, metric):
     if _data.load_error():
         return _figs.make_empty_fig("Run  python scripts/preprocess.py  first.")
 
     df_filtered = _data.filter_by_state(_data.COUNTIES, state)
-    return _figs.make_parcoords(df_filtered, selected_geoids or [])
+    return _figs.make_parcoords(df_filtered, selected_geoids or [], metric or DEFAULT_METRIC)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -176,17 +215,60 @@ def update_parcoords(state, selected_geoids):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.callback(
-    Output("scatter-plot", "figure"),
-    Input("scatter-x-dropdown", "value"),
-    Input("scatter-y-dropdown", "value"),
-    Input("state-dropdown",     "value"),
-    Input("selection-store",    "data"),
+    Output("scatter-plot",        "figure"),
+    Input("scatter-x-dropdown",   "value"),
+    Input("scatter-y-dropdown",   "value"),
+    Input("state-dropdown",       "value"),
+    Input("selection-store",      "data"),
+    Input("scatter-color-state",  "value"),
 )
-def update_scatter(x_metric, y_metric, state, selected_geoids):
+def update_scatter(x_metric, y_metric, state, selected_geoids, color_state):
     if _data.load_error():
         return _figs.make_empty_fig("Run preprocessing first.")
     df_filtered = _data.filter_by_state(_data.COUNTIES, state)
-    return _figs.make_scatter(df_filtered, x_metric, y_metric, selected_geoids or [])
+    return _figs.make_scatter(
+        df_filtered, x_metric, y_metric,
+        selected_geoids or [],
+        color_by_state=bool(color_state),
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Callback: accumulate parcoords axis constraint ranges
+# ══════════════════════════════════════════════════════════════════════════════
+# restyleData fires on every axis-brush interaction but only reports the
+# changed dimension.  We merge each event into a running dict so that
+# update_selection can see ALL active constraints at once.
+# The Reset button also clears this store.
+
+@app.callback(
+    Output("parcoords-constraints-store", "data"),
+    Input("parcoords-plot", "restyleData"),
+    Input("reset-btn",      "n_clicks"),
+    State("parcoords-constraints-store", "data"),
+    prevent_initial_call=True,
+)
+def update_parcoords_constraints(restyle_data, reset_clicks, current_constraints):
+    if ctx.triggered_id == "reset-btn":
+        return {}
+
+    if not restyle_data:
+        return current_constraints or {}
+
+    # restyleData is [changed_props_dict, [trace_indices]]
+    changed = restyle_data[0] if isinstance(restyle_data, list) else restyle_data
+    constraints = dict(current_constraints or {})
+
+    for key, value in changed.items():
+        m = re.match(r"dimensions\[(\d+)\]\.constraintrange", key)
+        if m:
+            dim_idx = m.group(1)   # keep as string for JSON Store serialisation
+            if value is None:
+                constraints.pop(dim_idx, None)
+            else:
+                constraints[dim_idx] = value
+
+    return constraints
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -195,13 +277,16 @@ def update_scatter(x_metric, y_metric, state, selected_geoids):
 
 @app.callback(
     Output("selection-store", "data"),
-    Input("reset-btn",    "n_clicks"),
-    Input("scatter-plot", "selectedData"),
-    Input("map-plot",     "clickData"),
-    State("selection-store", "data"),
+    Input("reset-btn",                    "n_clicks"),
+    Input("scatter-plot",                 "selectedData"),
+    Input("map-plot",                     "clickData"),
+    Input("parcoords-constraints-store",  "data"),
+    State("selection-store",              "data"),
+    State("state-dropdown",               "value"),
     prevent_initial_call=True,
 )
-def update_selection(reset_clicks, scatter_sel, map_click, current_sel):
+def update_selection(reset_clicks, scatter_sel, map_click, parcoords_constraints,
+                     current_sel, state):
     triggered = ctx.triggered_id
 
     if triggered == "reset-btn":
@@ -228,6 +313,13 @@ def update_selection(reset_clicks, scatter_sel, map_click, current_sel):
                     current.append(geoid)   # toggle on
                 return current
         return current_sel or []
+
+    if triggered == "parcoords-constraints-store":
+        if parcoords_constraints:
+            df = _data.filter_by_state(_data.COUNTIES, state or "All")
+            return _geoids_from_constraints(parcoords_constraints, df)
+        # All axis brushes cleared → clear selection
+        return []
 
     return no_update
 

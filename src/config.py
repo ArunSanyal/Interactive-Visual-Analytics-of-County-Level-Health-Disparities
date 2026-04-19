@@ -89,7 +89,7 @@ DEFAULT_METRIC  = "Years of Potential Life Lost Rate"
 DEFAULT_X       = "% Uninsured"
 DEFAULT_Y       = "Years of Potential Life Lost Rate"
 DEFAULT_METHOD  = "quantile"
-DEFAULT_K       = 5
+DEFAULT_K       = 7
 
 # ---------------------------------------------------------------------------
 # Classification methods (key → display label)
@@ -115,7 +115,7 @@ H3_RESOLUTION: int = 4
 # ---------------------------------------------------------------------------
 # Visual
 # ---------------------------------------------------------------------------
-COLORSCALE_HIGH_BAD  = "RdYlGn_r"   # high value = worse (most health metrics)
+COLORSCALE_HIGH_BAD  = "YlOrRd"     # high value = worse (most health metrics)
 COLORSCALE_HIGH_GOOD = "RdYlGn"     # high value = better
 NEUTRAL_COLOR        = "#adb5bd"    # missing / suppressed data
 
