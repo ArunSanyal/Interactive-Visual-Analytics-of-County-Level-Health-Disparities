@@ -50,6 +50,17 @@ def _colorscale_for_metric(metric: str) -> str:
     return COLORSCALE_HIGH_BAD if cfg.get("higher_is_worse", True) else COLORSCALE_HIGH_GOOD
 
 
+def _fmt_val(v: float) -> str:
+    """Compact number formatter for colorbar and annotation labels."""
+    if abs(v) >= 10_000:
+        return f"{v / 1_000:.0f}k"
+    if abs(v) >= 1_000:
+        return f"{v / 1_000:.1f}k"
+    if abs(v) >= 1:
+        return f"{v:.1f}"
+    return f"{v:.3f}"
+
+
 def _base_layout(**kwargs) -> dict:
     base = dict(
         paper_bgcolor=_BG,
@@ -156,13 +167,16 @@ def make_choropleth(
         colorbar=dict(
             title=dict(text=f"Class<br>(1–{k})", font=dict(size=11, color=_TEXT_COLOR)),
             tickvals=list(range(1, k + 1)),
-            ticktext=[f"C{i}" for i in range(1, k + 1)],
+            ticktext=[
+                f"C{i}  ≤{_fmt_val(result.breaks[i])}"
+                for i in range(1, k + 1)
+            ],
             bgcolor="rgba(30,33,48,0.85)",
             outlinewidth=0,
-            thickness=12,
-            len=0.6,
+            thickness=16,
+            len=0.65,
             x=1.01,
-            tickfont=dict(color=_TEXT_COLOR, size=10),
+            tickfont=dict(color=_TEXT_COLOR, size=9),
         ),
         name=label,
     ))
@@ -226,10 +240,9 @@ def make_hex_map(
     cs      = discrete_colorscale(k, cs_name)
 
     # Classify hex values using the same breaks from the county classification
-    import numpy as _np
-    bins = _np.array(result.bins)
+    bins = np.array(result.bins)
     def _cls(v):
-        idx = int(_np.searchsorted(bins, v, side="right"))
+        idx = int(np.searchsorted(bins, v, side="right"))
         return min(idx + 1, k)
 
     hex_df = hex_df.copy()
@@ -491,6 +504,7 @@ def make_scatter(
     y_metric: str,
     selected_geoids: list[str] | None = None,
     color_by_state: bool = False,
+    reset_count: int = 0,
 ) -> go.Figure:
     """Bivariate scatter; selected counties highlighted in a contrasting colour."""
     cols_needed = ["GEOID", "State", "County", x_metric, y_metric]
@@ -635,7 +649,7 @@ def make_scatter(
                 tracegroupgap=0,
             ),
             dragmode="lasso",
-            uirevision=f"scatter-{x_metric}-{y_metric}",
+            uirevision=f"scatter-{x_metric}-{y_metric}-r{reset_count}-n{len(selected_geoids or [])}",
         )
     )
     return fig

@@ -25,7 +25,7 @@ import numpy as np
 from src import data as _data
 from src.config import (
     METRICS, DEFAULT_METRIC, DEFAULT_K, DEFAULT_METHOD,
-    H3_RESOLUTION, PARCOORDS_METRICS,
+    H3_RESOLUTION, PARCOORDS_METRICS, DEFAULT_Y,
 )
 from src import classify as _cls
 from src import h3hex  as _hex
@@ -222,7 +222,7 @@ def update_parcoords(state, selected_geoids, metric):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.callback(
-    Output("scatter-y-dropdown", "value"),
+    Output("scatter-y-dropdown", "value", allow_duplicate=True),
     Input("metric-dropdown", "value"),
     prevent_initial_call=True,
 )
@@ -242,8 +242,9 @@ def sync_scatter_y(metric):
     Input("state-dropdown",       "value"),
     Input("selection-store",      "data"),
     Input("scatter-color-state",  "value"),
+    State("reset-btn",            "n_clicks"),
 )
-def update_scatter(x_metric, y_metric, state, selected_geoids, color_state):
+def update_scatter(x_metric, y_metric, state, selected_geoids, color_state, reset_clicks):
     if _data.load_error():
         return _figs.make_empty_fig("Run preprocessing first.")
     df_filtered = _data.filter_by_state(_data.COUNTIES, state)
@@ -251,6 +252,7 @@ def update_scatter(x_metric, y_metric, state, selected_geoids, color_state):
         df_filtered, x_metric, y_metric,
         selected_geoids or [],
         color_by_state=bool(color_state),
+        reset_count=reset_clicks or 0,
     )
 
 
@@ -314,26 +316,39 @@ def update_selection(reset_clicks, scatter_sel, map_click, parcoords_constraints
         return []
 
     if triggered == "scatter-plot":
-        if scatter_sel and scatter_sel.get("points"):
-            return [
-                p["customdata"][0]
-                for p in scatter_sel["points"]
+        if scatter_sel is None:
+            # selectedData resets to None when the figure re-renders — not a user action.
+            return no_update
+        pts = scatter_sel.get("points") or []
+        if pts:
+            new_sel = [
+                str(p["customdata"][0])
+                for p in pts
                 if p.get("customdata") and len(p["customdata"]) > 0
             ]
-        return []
+            if not new_sel:
+                return no_update
+            # Don't cascade if Plotly replayed the same selection via uirevision preservation.
+            if sorted(new_sel) == sorted(str(g) for g in (current_sel or [])):
+                return no_update
+            return new_sel
+        # Empty-points payload ({"points": []}) can arrive when Plotly resets the figure
+        # due to uirevision change — treat as no-op so we don't wipe a valid selection.
+        # The Reset button is the explicit control for clearing.
+        return no_update
 
     if triggered == "map-plot":
         if map_click and map_click.get("points"):
             pt    = map_click["points"][0]
-            geoid = pt.get("location") or (pt.get("customdata") or [None])[0]
+            geoid = str(pt.get("location") or (pt.get("customdata") or [None])[0] or "")
             if geoid:
-                current = list(current_sel or [])
+                current = [str(g) for g in (current_sel or [])]
                 if geoid in current:
                     current.remove(geoid)   # toggle off
                 else:
                     current.append(geoid)   # toggle on
                 return current
-        return current_sel or []
+        return [str(g) for g in (current_sel or [])]
 
     if triggered == "parcoords-constraints-store":
         if parcoords_constraints:
@@ -364,11 +379,10 @@ def update_parcoords_label(selected_geoids, state):
     name_col  = "County" if "County" in df_sel.columns else "NAME"
     state_col = "State"  if "State"  in df_sel.columns else None
 
-    names = []
-    for _, row in df_sel.iterrows():
-        county = row.get(name_col, "")
-        st     = row.get(state_col, "") if state_col else ""
-        names.append(f"{county}, {st}" if st else county)
+    if state_col and state_col in df_sel.columns:
+        names = (df_sel[name_col].fillna("") + ", " + df_sel[state_col].fillna("")).tolist()
+    else:
+        names = df_sel[name_col].fillna("").tolist()
 
     n = len(names)
     shown = names[:10]
@@ -443,16 +457,25 @@ def update_details(map_hover, scatter_hover):
     items = []
     for metric, cfg in METRICS.items():
         val = row.get(metric, np.nan)
+        higher_is_worse = cfg.get("higher_is_worse", True)
         if pd.isna(val):
-            val_str = "No data"
-            color   = "text-muted"
+            val_str   = "No data"
+            val_class = "text-muted"
         else:
-            val_str = f"{val:,.3f}"
-            color   = ""
+            val_str  = f"{val:,.3f}"
+            col_data = _data.COUNTIES[metric].dropna() if metric in _data.COUNTIES.columns else pd.Series([], dtype=float)
+            if len(col_data) > 0:
+                pct_rank = float((col_data < val).sum()) / len(col_data)
+                if higher_is_worse:
+                    val_class = "text-danger" if pct_rank >= 0.75 else ("text-success" if pct_rank <= 0.25 else "")
+                else:
+                    val_class = "text-danger" if pct_rank <= 0.25 else ("text-success" if pct_rank >= 0.75 else "")
+            else:
+                val_class = ""
         items.append(
             html.Div(className="detail-row", children=[
                 html.Span(cfg["label"], className="detail-label text-muted"),
-                html.Span(val_str, className=f"detail-value {color}"),
+                html.Span(val_str, className=f"detail-value {val_class}".strip()),
             ])
         )
 
@@ -464,6 +487,111 @@ def update_details(map_hover, scatter_hover):
         ]),
         html.Div(items, className="detail-metrics mt-1"),
     ])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Callback: hypothesis "Test →" buttons — load the relevant axis pair into scatter
+# ══════════════════════════════════════════════════════════════════════════════
+
+_HYP_AXES = {
+    "hyp-btn-1": ("% Children in Poverty",                    "Years of Potential Life Lost Rate"),
+    "hyp-btn-2": ("% Uninsured",                              "% Fair or Poor Health"),
+    "hyp-btn-3": ("Average Number of Mentally Unhealthy Days", "Average Number of Physically Unhealthy Days"),
+}
+
+@app.callback(
+    Output("scatter-x-dropdown", "value", allow_duplicate=True),
+    Output("scatter-y-dropdown", "value", allow_duplicate=True),
+    Input("hyp-btn-1", "n_clicks"),
+    Input("hyp-btn-2", "n_clicks"),
+    Input("hyp-btn-3", "n_clicks"),
+    prevent_initial_call=True,
+)
+def test_hypothesis(_b1, _b2, _b3):
+    triggered = ctx.triggered_id
+    if triggered in _HYP_AXES:
+        x, y = _HYP_AXES[triggered]
+        return x, y
+    return no_update, no_update
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Callback: metric description tooltip
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.callback(
+    Output("metric-info-tooltip", "children"),
+    Input("metric-dropdown", "value"),
+)
+def update_metric_tooltip(metric):
+    cfg = METRICS.get(metric or DEFAULT_METRIC, {})
+    return cfg.get("description", "")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Callback: sidebar mini-stats (n / mean / median for active metric + filter)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.callback(
+    Output("sidebar-stats", "children"),
+    Input("metric-dropdown",  "value"),
+    Input("state-dropdown",   "value"),
+    Input("selection-store",  "data"),
+)
+def update_sidebar_stats(metric, state, selected_geoids):
+    metric = metric or DEFAULT_METRIC
+    df  = _data.filter_by_state(_data.COUNTIES, state)
+    col = df[metric].dropna() if metric in df.columns else pd.Series([], dtype=float)
+    if col.empty:
+        return ""
+    n, mean_v, med_v = len(col), col.mean(), col.median()
+    fmt = lambda v: f"{v:,.2f}"
+
+    sel = selected_geoids or []
+    if sel:
+        sel_col = df[df["GEOID"].isin(sel)][metric].dropna() if metric in df.columns else pd.Series([], dtype=float)
+        if not sel_col.empty:
+            return html.Div([
+                html.Div([
+                    html.Span("All  ", className="text-muted"),
+                    html.Span(f"n={n} · μ={fmt(mean_v)} · med={fmt(med_v)}",
+                              className="text-muted"),
+                ]),
+                html.Div([
+                    html.Span("Sel  ", style={"color": "#fb923c"}),
+                    html.Span(
+                        f"n={len(sel_col)} · μ={fmt(sel_col.mean())} · med={fmt(sel_col.median())}",
+                        style={"color": "#fb923c"},
+                    ),
+                ]),
+            ], className="sidebar-stats")
+
+    return html.Div(
+        f"n={n} · μ={fmt(mean_v)} · med={fmt(med_v)}",
+        className="sidebar-stats text-muted",
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Callback: export selected counties as CSV
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.callback(
+    Output("download-csv", "data"),
+    Input("export-btn",      "n_clicks"),
+    State("selection-store", "data"),
+    State("state-dropdown",  "value"),
+    prevent_initial_call=True,
+)
+def export_csv(n_clicks, selected_geoids, state):
+    df  = _data.filter_by_state(_data.COUNTIES, state)
+    sel = selected_geoids or []
+    export_df = df[df["GEOID"].isin(sel)] if sel else df
+    cols      = ["GEOID", "State", "County"] + list(METRICS.keys())
+    export_df = export_df[[c for c in cols if c in export_df.columns]]
+    tag       = "selection" if sel else "all"
+    filename  = f"health_export_{tag}_{len(export_df)}counties.csv"
+    return dcc.send_data_frame(export_df.to_csv, filename, index=False)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

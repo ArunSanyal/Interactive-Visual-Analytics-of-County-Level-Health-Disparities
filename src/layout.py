@@ -23,7 +23,7 @@ from src.config import (
 from src import data as _data
 
 
-# ── Helper ────────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _metric_options() -> list[dict]:
     return [{"label": cfg["label"], "value": key} for key, cfg in METRICS.items()]
@@ -33,6 +33,16 @@ def _state_options() -> list[dict]:
     opts = [{"label": "All States", "value": "All"}]
     opts += [{"label": s, "value": s} for s in _data.STATES]
     return opts
+
+
+def _stat_pill(number: str, label: str) -> dbc.Col:
+    return dbc.Col(
+        html.Div([
+            html.Div(number, className="stat-number"),
+            html.Div(label,  className="stat-label"),
+        ], className="stat-pill"),
+        width="auto",
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -88,29 +98,45 @@ def home_layout() -> html.Div:
                 ]),
             ]),
 
+            # ── Stats strip ───────────────────────────────────────────────────
+            dbc.Container(fluid=True, className="stats-strip py-3", children=[
+                dbc.Row([
+                    _stat_pill("3,144", "Counties"),
+                    _stat_pill("7",     "Health Metrics"),
+                    _stat_pill("4",     "Class Methods"),
+                    _stat_pill("50",    "States"),
+                ], className="justify-content-center g-3"),
+            ]),
+
             # ── Feature cards ─────────────────────────────────────────────────
             dbc.Container(fluid=True, className="py-5 feature-section", children=[
                 html.H2("Key Features", className="text-center fw-bold mb-4"),
                 dbc.Row([
-                    _feature_card("bi-map-fill",      "Choropleth Map",
+                    _feature_card("bi-map-fill",       "Choropleth Map",
                         "County-level choropleth with 4 classification methods: "
-                        "Quantile, Equal Interval, Natural Breaks (Jenks), and Std. Mean."),
+                        "Quantile, Equal Interval, Natural Breaks (Jenks), and Std. Mean.",
+                        "#60a5fa", "rgba(96,165,250,0.12)"),
                     _feature_card("bi-bar-chart-fill", "Distribution Context",
                         "Histogram shows the full metric distribution with class-break "
-                        "lines overlaid—so you see exactly what each colour class covers."),
+                        "lines overlaid—so you see exactly what each colour class covers.",
+                        "#34d399", "rgba(52,211,153,0.12)"),
                     _feature_card("bi-scatter-chart",  "Linked Scatter Plot",
                         "Bivariate scatter with lasso/box selection. Selected counties "
-                        "highlight across all views simultaneously."),
+                        "highlight across all views simultaneously.",
+                        "#fb923c", "rgba(251,146,60,0.12)"),
                     _feature_card("bi-list-columns",   "Parallel Coordinates",
                         "Compare 7 health and socioeconomic variables side by side. "
-                        "Selected counties are highlighted in blue."),
+                        "Selected counties are highlighted in blue.",
+                        "#818cf8", "rgba(129,140,248,0.12)"),
                     _feature_card("bi-hexagon-fill",   "Tile Cartogram (H3)",
                         "Each county maps to one equal-sized hex tile regardless of land "
                         "area — states with more counties occupy proportionally more tiles, "
-                        "eliminating geographic area bias."),
+                        "eliminating geographic area bias.",
+                        "#22d3ee", "rgba(34,211,238,0.12)"),
                     _feature_card("bi-link-45deg",     "Coordinated Views",
                         "A shared selection store links map, scatter, histogram, and "
-                        "parallel coordinates—brush in one, highlight in all."),
+                        "parallel coordinates—brush in one, highlight in all.",
+                        "#f472b6", "rgba(244,114,182,0.12)"),
                 ], className="g-4 justify-content-center"),
             ]),
 
@@ -134,11 +160,16 @@ def home_layout() -> html.Div:
     )
 
 
-def _feature_card(icon: str, title: str, body: str) -> dbc.Col:
+def _feature_card(icon: str, title: str, body: str,
+                  icon_color: str = "#60a5fa",
+                  icon_bg:    str = "rgba(96,165,250,0.12)") -> dbc.Col:
     return dbc.Col(
         dbc.Card([
             dbc.CardBody([
-                html.I(className=f"bi {icon} feature-icon mb-2"),
+                html.I(
+                    className=f"bi {icon} feature-icon mb-3",
+                    style={"color": icon_color, "background": icon_bg},
+                ),
                 html.H6(title, className="fw-bold mb-2"),
                 html.P(body, className="text-muted small mb-0"),
             ], className="text-center p-3"),
@@ -158,6 +189,7 @@ def viz_layout() -> html.Div:
         dcc.Store(id="selection-store",             data=[]),
         dcc.Store(id="hover-store",                 data=None),
         dcc.Store(id="parcoords-constraints-store", data={}),
+        dcc.Download(id="download-csv"),
 
         # ── Top bar ───────────────────────────────────────────────────────────
         dbc.Navbar(
@@ -192,14 +224,27 @@ def viz_layout() -> html.Div:
 
                         html.H6("MAP SETTINGS", className="sidebar-section-title"),
 
-                        html.Label("Health Metric", className="ctrl-label"),
+                        html.Div(className="d-flex align-items-center mb-1", children=[
+                            html.Label("Health Metric", className="ctrl-label mb-0"),
+                            html.I(
+                                className="bi bi-info-circle ms-1 text-muted",
+                                id="metric-info-icon",
+                                style={"fontSize": "11px", "cursor": "help"},
+                            ),
+                        ]),
+                        dbc.Tooltip(
+                            id="metric-info-tooltip",
+                            target="metric-info-icon",
+                            placement="right",
+                        ),
                         dcc.Dropdown(
                             id="metric-dropdown",
                             options=_metric_options(),
                             value=DEFAULT_METRIC,
                             clearable=False,
-                            className="dash-dropdown mb-3",
+                            className="dash-dropdown mb-1",
                         ),
+                        html.Div(id="sidebar-stats", className="sidebar-stats mb-3"),
 
                         html.Label("Classification / Color Encoding", className="ctrl-label"),
                         dcc.Dropdown(
@@ -252,6 +297,15 @@ def viz_layout() -> html.Div:
                             className="w-100 mb-2",
                             n_clicks=0,
                         ),
+                        dbc.Button(
+                            [html.I(className="bi bi-download me-1"), "Export CSV"],
+                            id="export-btn",
+                            color="info",
+                            outline=True,
+                            size="sm",
+                            className="w-100 mb-2",
+                            n_clicks=0,
+                        ),
                         html.Div(id="selection-info", className="selection-info"),
 
                         html.Hr(className="divider"),
@@ -298,15 +352,26 @@ def viz_layout() -> html.Div:
                                 html.P("Does poverty predict premature death?",
                                        className="hyp-text mb-1"),
                                 html.P("Expect r > 0.5 between Child Poverty & YPLL Rate",
-                                       className="hyp-sub mb-2"),
+                                       className="hyp-sub mb-1"),
+                                dbc.Button("Test →", id="hyp-btn-1", size="sm",
+                                           color="info", outline=True,
+                                           className="hyp-test-btn mb-2", n_clicks=0),
+
                                 html.P("Does uninsured rate predict poor health?",
                                        className="hyp-text mb-1"),
                                 html.P("Expect r > 0.4 between Uninsured & Fair/Poor Health",
-                                       className="hyp-sub mb-2"),
+                                       className="hyp-sub mb-1"),
+                                dbc.Button("Test →", id="hyp-btn-2", size="sm",
+                                           color="info", outline=True,
+                                           className="hyp-test-btn mb-2", n_clicks=0),
+
                                 html.P("Do mental & physical health track together?",
                                        className="hyp-text mb-1"),
                                 html.P("Expect r > 0.6 between Phys. & Ment. Unhealthy Days",
-                                       className="hyp-sub mb-0"),
+                                       className="hyp-sub mb-1"),
+                                dbc.Button("Test →", id="hyp-btn-3", size="sm",
+                                           color="info", outline=True,
+                                           className="hyp-test-btn mb-0", n_clicks=0),
                             ], className="p-2"),
                         ], className="hyp-card mb-2"),
                     ]),
@@ -319,7 +384,7 @@ def viz_layout() -> html.Div:
                     dbc.Row([
                         # Map
                         dbc.Col(width=7, children=[
-                            html.Div(className="panel map-panel", children=[
+                            html.Div(className="panel map-panel panel-map-accent", children=[
                                 html.Div(className="panel-header d-flex align-items-center", children=[
                                     html.I(className="bi bi-map me-2 text-primary"),
                                     html.Span(id="map-title", className="panel-title fw-semibold"),
@@ -345,7 +410,7 @@ def viz_layout() -> html.Div:
 
                         # Scatter
                         dbc.Col(width=5, children=[
-                            html.Div(className="panel", children=[
+                            html.Div(className="panel panel-scatter-accent", children=[
                                 html.Div(className="panel-header d-flex align-items-center", children=[
                                     html.I(className="bi bi-scatter-chart me-2 text-warning"),
                                     html.Span("Scatter Plot", className="panel-title"),
@@ -370,7 +435,7 @@ def viz_layout() -> html.Div:
                     ], className="g-2 mb-2"),
 
                     # ── Details strip ─────────────────────────────────────────
-                    html.Div(className="panel details-panel mb-2", children=[
+                    html.Div(className="panel details-panel panel-details-accent mb-2", children=[
                         html.Div(className="panel-header", children=[
                             html.I(className="bi bi-info-circle me-2 text-info"),
                             html.Span("County Details — hover map or scatter to inspect",
@@ -382,7 +447,7 @@ def viz_layout() -> html.Div:
                     # ── ROW 2: Parcoords + Histogram ──────────────────────────
                     dbc.Row([
                         dbc.Col(width=8, children=[
-                            html.Div(className="panel bottom-panel", children=[
+                            html.Div(className="panel bottom-panel panel-parcoords-accent", children=[
                                 html.Div(className="panel-header d-flex align-items-center", children=[
                                     html.I(className="bi bi-list-columns me-2 text-info"),
                                     html.Span("Parallel Coordinates", className="panel-title"),
@@ -400,7 +465,7 @@ def viz_layout() -> html.Div:
                             ]),
                         ]),
                         dbc.Col(width=4, children=[
-                            html.Div(className="panel bottom-panel", children=[
+                            html.Div(className="panel bottom-panel panel-hist-accent", children=[
                                 html.Div(className="panel-header d-flex align-items-center", children=[
                                     html.I(className="bi bi-bar-chart-fill me-2 text-success"),
                                     html.Span("Distribution", className="panel-title"),
