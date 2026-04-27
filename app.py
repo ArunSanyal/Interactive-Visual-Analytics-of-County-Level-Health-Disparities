@@ -174,12 +174,13 @@ def update_map(metric, method, k, map_mode, state, selected_geoids):
 
 @app.callback(
     Output("histogram-plot", "figure"),
-    Input("metric-dropdown", "value"),
-    Input("method-dropdown", "value"),
-    Input("k-slider",        "value"),
-    Input("state-dropdown",  "value"),
+    Input("metric-dropdown",  "value"),
+    Input("method-dropdown",  "value"),
+    Input("k-slider",         "value"),
+    Input("state-dropdown",   "value"),
+    Input("selection-store",  "data"),
 )
-def update_histogram(metric, method, k, state):
+def update_histogram(metric, method, k, state, selected_geoids):
     if _data.load_error():
         return _figs.make_empty_fig("Run  python scripts/preprocess.py  first.")
 
@@ -189,7 +190,7 @@ def update_histogram(metric, method, k, state):
 
     df_filtered = _data.filter_by_state(_data.COUNTIES, state)
     result      = _classify_filtered(df_filtered, metric, method, k)
-    return _figs.make_histogram(df_filtered, metric, result)
+    return _figs.make_histogram(df_filtered, metric, result, selected_geoids or [])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -207,7 +208,27 @@ def update_parcoords(state, selected_geoids, metric):
         return _figs.make_empty_fig("Run  python scripts/preprocess.py  first.")
 
     df_filtered = _data.filter_by_state(_data.COUNTIES, state)
-    return _figs.make_parcoords(df_filtered, selected_geoids or [], metric or DEFAULT_METRIC)
+    # uirevision key: changes only when axes/state change, NOT on selection changes.
+    # This preserves the axis-brush constraint UI when the selection-store fires.
+    uirev = f"pc-{state or 'All'}-{metric or DEFAULT_METRIC}"
+    return _figs.make_parcoords(
+        df_filtered, selected_geoids or [], metric or DEFAULT_METRIC,
+        uirevision=uirev,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Callback: coordinated axes — scatter Y follows the primary metric
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.callback(
+    Output("scatter-y-dropdown", "value"),
+    Input("metric-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def sync_scatter_y(metric):
+    """Keep scatter Y axis coordinated with the choropleth metric."""
+    return metric or DEFAULT_Y
 
 
 # ══════════════════════════════════════════════════════════════════════════════

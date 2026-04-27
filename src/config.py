@@ -13,18 +13,18 @@ Keys must match column names in outputs/chr_clean.csv (set in preprocess.py).
 # higher_is_worse = True means high value = bad (drives colorscale direction)
 # ---------------------------------------------------------------------------
 METRICS: dict = {
-    "Years of Potential Life Lost Rate": {
-        "label": "Premature Death (YPLL Rate)",
-        "short_label": "YPLL Rate",
-        "description": "Years of Potential Life Lost per 100,000 population (age-adjusted)",
-        "unit": "per 100k",
-        "higher_is_worse": True,
-    },
     "Average Number of Physically Unhealthy Days": {
         "label": "Physically Unhealthy Days",
         "short_label": "Phys. Unhealthy",
         "description": "Avg. physically unhealthy days per month (self-reported)",
         "unit": "days/month",
+        "higher_is_worse": True,
+    },
+    "Years of Potential Life Lost Rate": {
+        "label": "Premature Death (YPLL Rate)",
+        "short_label": "YPLL Rate",
+        "description": "Years of Potential Life Lost per 100,000 population (age-adjusted)",
+        "unit": "per 100k",
         "higher_is_worse": True,
     },
     "Average Number of Mentally Unhealthy Days": {
@@ -85,9 +85,9 @@ CHR_COL_POSITIONS: dict = {
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-DEFAULT_METRIC  = "Years of Potential Life Lost Rate"
+DEFAULT_METRIC  = "Average Number of Physically Unhealthy Days"
 DEFAULT_X       = "% Uninsured"
-DEFAULT_Y       = "Years of Potential Life Lost Rate"
+DEFAULT_Y       = "Average Number of Physically Unhealthy Days"
 DEFAULT_METHOD  = "quantile"
 DEFAULT_K       = 7
 

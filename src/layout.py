@@ -265,7 +265,11 @@ def viz_layout() -> html.Div:
                             clearable=False,
                             className="dash-dropdown mb-2",
                         ),
-                        html.Label("Y Axis", className="ctrl-label"),
+                        html.Label([
+                            "Y Axis",
+                            dbc.Badge("synced to map", color="info",
+                                      className="ms-2", style={"fontSize": "9px"}),
+                        ], className="ctrl-label"),
                         dcc.Dropdown(
                             id="scatter-y-dropdown",
                             options=_metric_options(),
@@ -324,7 +328,7 @@ def viz_layout() -> html.Div:
                                               style={"fontSize": "10px"}),
                                 ]),
                                 dcc.Loading(
-                                    type="circle", color="#4cc9f0",
+                                    type="circle", color="#60a5fa",
                                     children=dcc.Graph(
                                         id="map-plot",
                                         config={
@@ -347,7 +351,7 @@ def viz_layout() -> html.Div:
                                     html.Span("Scatter Plot", className="panel-title"),
                                     html.Small(" — lasso/box-select to highlight", className="text-muted ms-2"),
                                 ]),
-                                dcc.Loading(type="dot", color="#4cc9f0", children=
+                                dcc.Loading(type="dot", color="#60a5fa", children=
                                     dcc.Graph(
                                         id="scatter-plot",
                                         config={
@@ -385,7 +389,7 @@ def viz_layout() -> html.Div:
                                     html.Small(" — drag axes to filter · filtered counties highlight on map",
                                                className="text-muted ms-2"),
                                 ]),
-                                dcc.Loading(type="dot", color="#4cc9f0", children=
+                                dcc.Loading(type="dot", color="#60a5fa", children=
                                     dcc.Graph(
                                         id="parcoords-plot",
                                         config={"displayModeBar": False},
@@ -402,7 +406,7 @@ def viz_layout() -> html.Div:
                                     html.Span("Distribution", className="panel-title"),
                                     html.Small(" — class breaks overlaid", className="text-muted ms-2"),
                                 ]),
-                                dcc.Loading(type="dot", color="#4cc9f0", children=
+                                dcc.Loading(type="dot", color="#60a5fa", children=
                                     dcc.Graph(
                                         id="histogram-plot",
                                         config={"displayModeBar": False},

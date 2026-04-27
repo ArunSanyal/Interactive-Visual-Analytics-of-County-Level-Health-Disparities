@@ -36,9 +36,9 @@ from src.classify import ClassifyResult, discrete_colorscale
 
 # ── Shared style constants ────────────────────────────────────────────────────
 _BG           = "rgba(0,0,0,0)"
-_PANEL_BG     = "#16213e"
+_PANEL_BG     = "#111113"
 _GRID_COLOR   = "rgba(255,255,255,0.07)"
-_TEXT_COLOR   = "#e0e0e0"
+_TEXT_COLOR   = "#f4f4f5"
 _FONT         = dict(family="Inter, sans-serif", color=_TEXT_COLOR, size=12)
 _MAPBOX_STYLE = "carto-darkmatter"
 # YlOrRd: perceptually uniform, colorblind-accessible sequential scale for health data.
@@ -182,11 +182,12 @@ def make_choropleth(
                 zmin=1,
                 zmax=k,
                 marker_opacity=1.0,
-                marker_line_width=3.5,
-                marker_line_color="#f4a261",
+                marker_line_width=4.5,
+                marker_line_color="#ffffff",
                 text=sel_df["_label"],
                 hoverinfo="text",
                 showscale=False,
+                name="Selected",
             ))
 
     _center = center or {"lat": 38.5, "lon": -96.0}
@@ -233,51 +234,107 @@ def make_hex_map(
 
     hex_df = hex_df.copy()
     hex_df["_class"] = hex_df["value"].apply(_cls).astype(float)
+
+    def _fmt_counties(counties) -> str:
+        if not isinstance(counties, list) or not counties:
+            return "—"
+        shown = counties[:5]
+        rest  = len(counties) - 5
+        txt   = "<br>&nbsp;&nbsp;".join(shown)
+        if rest > 0:
+            txt += f"<br>&nbsp;&nbsp;+{rest} more"
+        return txt
+
     hex_df["_label"] = hex_df.apply(
-        lambda r: f"<b>H3 Hex</b><br>Mean {label}: {r['value']:,.3f}"
-                  f"<br>Counties aggregated: {r['count']}",
+        lambda r: (
+            f"<b>H3 Hex</b><br>"
+            f"Mean {label}: {r['value']:,.3f}<br>"
+            f"Counties ({int(r['count'])}):<br>"
+            f"&nbsp;&nbsp;{_fmt_counties(r.get('counties', []))}"
+        ),
         axis=1,
     )
 
     n_tiles    = len(hex_df)
     n_counties = int(hex_df["count"].sum())
 
-    fig = go.Figure(go.Choroplethmapbox(
-        geojson=hex_geojson,
-        locations=hex_df["h3_index"],
-        featureidkey="properties.h3_index",
-        z=hex_df["_class"],
-        colorscale=cs,
-        zmin=1,
-        zmax=k,
-        marker_opacity=0.82,
-        marker_line_width=1.0,
-        marker_line_color="#1a1a2e",
-        text=hex_df["_label"],
-        hoverinfo="text",
-        showscale=True,
-        colorbar=dict(
-            title=dict(text=f"Class<br>(1–{k})", font=dict(size=11, color=_TEXT_COLOR)),
-            tickvals=list(range(1, k + 1)),
-            ticktext=[f"C{i}" for i in range(1, k + 1)],
-            bgcolor="rgba(22,33,62,0.90)",
-            outlinewidth=0,
-            thickness=12,
-            len=0.6,
-            x=1.01,
-            tickfont=dict(color=_TEXT_COLOR, size=10),
-        ),
-    ))
+    # Split into low / high count for opacity stratification
+    q50 = float(hex_df["count"].median())
+    low_df  = hex_df[hex_df["count"] <= q50]
+    high_df = hex_df[hex_df["count"] >  q50]
+
+    _colorbar = dict(
+        title=dict(text=f"Class<br>(1–{k})", font=dict(size=11, color=_TEXT_COLOR)),
+        tickvals=list(range(1, k + 1)),
+        ticktext=[
+            f"C{i} ({result.breaks[i-1]:,.1f}–{result.breaks[i]:,.1f})"
+            for i in range(1, k + 1)
+        ],
+        bgcolor="rgba(28,28,31,0.88)",
+        outlinewidth=0,
+        thickness=14,
+        len=0.65,
+        x=1.01,
+        tickfont=dict(color=_TEXT_COLOR, size=9),
+    )
+
+    traces = []
+    for sub, opacity, show_scale in [(low_df, 0.58, False), (high_df, 0.88, True)]:
+        if sub.empty:
+            continue
+        traces.append(go.Choroplethmapbox(
+            geojson=hex_geojson,
+            locations=sub["h3_index"],
+            featureidkey="properties.h3_index",
+            z=sub["_class"],
+            colorscale=cs,
+            zmin=1,
+            zmax=k,
+            marker_opacity=opacity,
+            marker_line_width=0.8,
+            marker_line_color="#0d1b2a",
+            text=sub["_label"],
+            hoverinfo="text",
+            showscale=show_scale,
+            colorbar=_colorbar if show_scale else None,
+        ))
+
+    # Fallback: if all counties are the same count use single trace
+    if not traces:
+        traces.append(go.Choroplethmapbox(
+            geojson=hex_geojson,
+            locations=hex_df["h3_index"],
+            featureidkey="properties.h3_index",
+            z=hex_df["_class"],
+            colorscale=cs,
+            zmin=1,
+            zmax=k,
+            marker_opacity=0.82,
+            marker_line_width=0.8,
+            marker_line_color="#0d1b2a",
+            text=hex_df["_label"],
+            hoverinfo="text",
+            showscale=True,
+            colorbar=_colorbar,
+        ))
+
+    fig = go.Figure(traces)
 
     fig.add_annotation(
-        text=f"{n_tiles} tiles · {n_counties} counties · mean per tile · H3 res {resolution}",
+        text=(
+            f"<b>{n_tiles}</b> hex tiles · <b>{n_counties}</b> counties · "
+            f"mean per tile · H3 res {resolution}<br>"
+            f"<span style='color:rgba(200,200,200,0.6)'>"
+            f"Darker tiles = more counties · hover for county names</span>"
+        ),
         xref="paper", yref="paper",
         x=0.01, y=0.01,
         xanchor="left", yanchor="bottom",
         showarrow=False,
-        font=dict(size=10, color="rgba(224,224,224,0.75)"),
-        bgcolor="rgba(0,0,0,0.45)",
-        borderpad=4,
+        font=dict(size=10, color="rgba(224,224,224,0.85)"),
+        bgcolor="rgba(0,0,0,0.55)",
+        borderpad=5,
+        align="left",
     )
 
     _center = center or {"lat": 38.5, "lon": -96.0}
@@ -301,6 +358,7 @@ def make_histogram(
     df: pd.DataFrame,
     metric: str,
     result: ClassifyResult,
+    selected_geoids: list[str] | None = None,
 ) -> go.Figure:
     """Distribution histogram with vertical lines marking class breaks."""
     series = df[metric].dropna() if metric in df.columns else pd.Series([], dtype=float)
@@ -337,22 +395,62 @@ def make_histogram(
             hovertemplate=f"Class {i+1}<br>Count: %{{y}}<extra></extra>",
         ))
 
-    # Class break lines
+    # Class break lines — one clean annotation box lists all values; no per-line labels
+    def _fmt_break(v: float) -> str:
+        if abs(v) >= 10_000:
+            return f"{v / 1_000:.0f}k"
+        if abs(v) >= 1_000:
+            return f"{v / 1_000:.1f}k"
+        if abs(v) >= 1:
+            return f"{v:.2f}"
+        return f"{v:.3f}"
+
     interior_breaks = result.breaks[1:-1]
     for b in interior_breaks:
         fig.add_vline(
             x=b,
-            line_width=1.5,
+            line_width=1.2,
             line_dash="dash",
-            line_color="rgba(255,255,255,0.6)",
-            annotation_text=f"{b:,.2f}",
-            annotation_position="top",
-            annotation_font=dict(size=9, color="rgba(255,255,255,0.7)"),
+            line_color="rgba(255,255,255,0.45)",
         )
+
+    if interior_breaks:
+        fig.add_annotation(
+            text="Breaks: " + " | ".join(_fmt_break(b) for b in interior_breaks),
+            xref="paper", yref="paper",
+            x=0.5, y=1.0,
+            xanchor="center", yanchor="bottom",
+            showarrow=False,
+            font=dict(size=9, color="rgba(220,220,220,0.90)"),
+            bgcolor="rgba(28,28,31,0.85)",
+            borderpad=4,
+        )
+
+    # Selected counties overlay
+    has_sel = False
+    if selected_geoids and "GEOID" in df.columns:
+        sel_df = df[df["GEOID"].isin(set(selected_geoids))]
+        sel_series = sel_df[metric].dropna() if metric in sel_df.columns else pd.Series([], dtype=float)
+        if not sel_series.empty:
+            has_sel = True
+            _data_min = float(series.min())
+            _data_max = float(series.max())
+            _bin_size  = (_data_max - _data_min) / max(40, 1)
+            fig.add_trace(go.Histogram(
+                x=sel_series,
+                name=f"Selected ({len(sel_series)})",
+                marker_color="rgba(251,146,60,0.80)",
+                marker_line_color="rgba(251,146,60,1.0)",
+                marker_line_width=0.5,
+                opacity=0.85,
+                showlegend=True,
+                xbins=dict(start=_data_min, end=_data_max, size=_bin_size),
+                hovertemplate="Selected: %{y}<extra></extra>",
+            ))
 
     fig.update_layout(
         **_base_layout(
-            margin=dict(l=40, r=12, t=12, b=40),
+            margin=dict(l=40, r=12, t=36, b=40),
             xaxis=dict(
                 title=dict(text=unit or label, font=dict(size=10)),
                 gridcolor=_GRID_COLOR,
@@ -369,7 +467,15 @@ def make_histogram(
             ),
             bargap=0.02,
             barmode="overlay",
-            showlegend=False,
+            showlegend=has_sel,
+            legend=dict(
+                font=dict(size=9, color=_TEXT_COLOR),
+                bgcolor="rgba(28,28,31,0.80)",
+                bordercolor=_GRID_COLOR,
+                borderwidth=1,
+                x=0.99, y=0.99,
+                xanchor="right", yanchor="top",
+            ) if has_sel else {},
         )
     )
     return fig
@@ -416,7 +522,8 @@ def make_scatter(
         _palette = pc.qualitative.Alphabet
         _states  = sorted(unsel["State"].dropna().unique())
         _s2c     = {s: _palette[i % len(_palette)] for i, s in enumerate(_states)}
-        _fade    = 0.25 if sel_set else 0.70
+        _dot_size  = 5 if sel_set else 6
+        _dot_fade  = 0.28 if sel_set else 0.72
         for st in _states:
             _sdf = unsel[unsel["State"] == st]
             if _sdf.empty:
@@ -426,13 +533,26 @@ def make_scatter(
                 y=_sdf[y_metric] if y_metric in _sdf.columns else [],
                 mode="markers",
                 name=st,
-                marker=dict(color=_s2c[st], size=4 if sel_set else 5,
-                            opacity=_fade, line=dict(width=0)),
+                marker=dict(color=_s2c[st], size=_dot_size,
+                            opacity=_dot_fade, line=dict(width=0)),
                 text=_sdf.apply(_county_label, axis=1),
                 customdata=_sdf[["GEOID"]].values,
                 hovertemplate=_ht,
-                legendgroup=st,
+                showlegend=False,   # 50-item legend is unreadable; hover shows state
+                selected=dict(marker=dict(opacity=1.0, size=_dot_size + 3)),
+                unselected=dict(marker=dict(opacity=0.06)),
             ))
+        # Compact state-colour key shown as annotation instead of legend
+        fig.add_annotation(
+            text="<b>Colored by state</b> · hover for details",
+            xref="paper", yref="paper",
+            x=0.99, y=0.02,
+            xanchor="right", yanchor="bottom",
+            showarrow=False,
+            font=dict(size=10, color="rgba(200,210,220,0.80)"),
+            bgcolor="rgba(28,28,31,0.80)",
+            borderpad=4,
+        )
     else:
         dot_color = "rgba(140,150,170,0.12)" if sel_set else "rgba(99,110,250,0.50)"
         dot_size  = 4 if sel_set else 5
@@ -445,7 +565,7 @@ def make_scatter(
             text=unsel.apply(_county_label, axis=1) if not unsel.empty else [],
             customdata=unsel[["GEOID"]].values if not unsel.empty else [],
             hovertemplate=_ht,
-            selected=dict(marker=dict(color="#e94560", size=9, opacity=1)),
+            selected=dict(marker=dict(color="#fb923c", size=9, opacity=1)),
             unselected=dict(marker=dict(opacity=0.12)),
         ))
 
@@ -457,18 +577,18 @@ def make_scatter(
             x=sel[x_metric],
             y=sel[y_metric],
             mode="markers+text" if show_labels else "markers",
-            marker=dict(color="#e94560", size=12, line=dict(width=2, color="#ffffff"), symbol="circle"),
+            marker=dict(color="#fb923c", size=12, line=dict(width=2, color="#ffffff"), symbol="circle"),
             name="Selected",
             text=sel_labels,
             textposition="top center",
-            textfont=dict(size=9, color="#e94560"),
+            textfont=dict(size=9, color="#fb923c"),
             customdata=sel[["GEOID"]].values,
             hovertemplate=(
                 "<b>%{text}</b> ✓<br>"
                 f"{x_label}: %{{x:.3f}}<br>"
                 f"{y_label}: %{{y:.3f}}<extra></extra>"
             ),
-            showlegend=not color_by_state,
+            showlegend=True,
         ))
 
     # Pearson r annotation — supports visual hypothesis testing (Wickham et al. 2010)
@@ -507,7 +627,7 @@ def make_scatter(
             ),
             legend=dict(
                 font=dict(size=9, color=_TEXT_COLOR),
-                bgcolor="rgba(22,33,62,0.85)",
+                bgcolor="rgba(28,28,31,0.85)",
                 bordercolor=_GRID_COLOR,
                 borderwidth=1,
                 x=0.01, y=0.99,
@@ -515,7 +635,7 @@ def make_scatter(
                 tracegroupgap=0,
             ),
             dragmode="lasso",
-            uirevision="scatter",
+            uirevision=f"scatter-{x_metric}-{y_metric}",
         )
     )
     return fig
@@ -529,6 +649,7 @@ def make_parcoords(
     df: pd.DataFrame,
     selected_geoids: list[str] | None = None,
     metric: str | None = None,
+    uirevision: str = "parcoords",
 ) -> go.Figure:
     """
     Parallel coordinates for PARCOORDS_METRICS.
@@ -556,7 +677,7 @@ def make_parcoords(
         plot_df = full_df[full_df["GEOID"].isin(sel_set)].copy()
         if plot_df.empty:
             plot_df = full_df.sample(min(_BG_SAMPLE, len(full_df)), random_state=42)
-        colorscale = [[0.0, "#4cc9f0"], [1.0, "#4cc9f0"]]
+        colorscale = [[0.0, "#60a5fa"], [1.0, "#60a5fa"]]
         cmin, cmax = 0.0, 1.0
         line_vals  = [1.0] * len(plot_df)
     else:
@@ -601,6 +722,7 @@ def make_parcoords(
     fig.update_layout(
         **_base_layout(
             margin=dict(l=100, r=100, t=50, b=40),
+            uirevision=uirevision,
         )
     )
     return fig

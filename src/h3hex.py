@@ -141,17 +141,21 @@ def build_hex_layer(
             h3_idx = _latlng_to_cell(lat, lng, resolution)
         except Exception:
             continue
-        rows.append({"h3_index": h3_idx, "value": float(val)})
+        county_name = str(row.get("County", row.get("NAME", ""))).strip()
+        state_name  = str(row.get("State", "")).strip()
+        name = f"{county_name}, {state_name}" if state_name else county_name
+        rows.append({"h3_index": h3_idx, "value": float(val), "name": name})
 
     if not rows:
         return {"type": "FeatureCollection", "features": []}, pd.DataFrame(
-            columns=["h3_index", "value", "count"]
+            columns=["h3_index", "value", "count", "counties"]
         )
 
     tmp = pd.DataFrame(rows)
     hex_df = tmp.groupby("h3_index").agg(
         value=("value", "mean"),
         count=("value", "count"),
+        counties=("name", list),
     ).reset_index()
 
     # ── Build GeoJSON polygons ─────────────────────────────────────────────────
