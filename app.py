@@ -124,6 +124,7 @@ def _geoids_from_constraints(constraints: dict, df: pd.DataFrame) -> list:
     Output("map-title",         "children"),
     Output("map-mode-badge",    "children"),
     Output("map-county-count",  "children"),
+    Output("hex-geoid-store",   "data"),
     Input("metric-dropdown",  "value"),
     Input("method-dropdown",  "value"),
     Input("k-slider",         "value"),
@@ -148,11 +149,17 @@ def update_map(metric, method, k, map_mode, state, selected_geoids):
     geoid_set    = set(df_filtered["GEOID"].astype(str))
     filt_geojson = _data.filter_geojson(_data.GEOJSON, geoid_set)
 
+    hex_store = {}
     if map_mode == "hex":
         hex_geojson, hex_df = _hex.build_hex_layer(
             df_filtered, filt_geojson, metric, H3_RESOLUTION
         )
-        map_fig = _figs.make_hex_map(hex_geojson, hex_df, metric, result)
+        if "geoids" in hex_df.columns:
+            hex_store = {row["h3_index"]: row["geoids"] for _, row in hex_df.iterrows()}
+        map_fig = _figs.make_hex_map(
+            hex_geojson, hex_df, metric, result,
+            selected_geoids=selected_geoids or [],
+        )
     else:
         map_fig = _figs.make_choropleth(
             df_filtered, filt_geojson, metric, result,
@@ -165,7 +172,7 @@ def update_map(metric, method, k, map_mode, state, selected_geoids):
         count_text = f"{n_sel} selected / {n_total} counties"
     else:
         count_text = f"{n_total} counties"
-    return map_fig, label, mode_label, count_text
+    return map_fig, label, mode_label, count_text, hex_store
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -304,16 +311,22 @@ def update_parcoords_constraints(restyle_data, reset_clicks, current_constraints
     Input("scatter-plot",                 "selectedData"),
     Input("map-plot",                     "clickData"),
     Input("parcoords-constraints-store",  "data"),
+    Input("combined-search",               "value"),
     State("selection-store",              "data"),
     State("state-dropdown",               "value"),
+    State("hex-geoid-store",              "data"),
     prevent_initial_call=True,
 )
 def update_selection(reset_clicks, scatter_sel, map_click, parcoords_constraints,
-                     current_sel, state):
+                     combined_search, current_sel, state, hex_store):
     triggered = ctx.triggered_id
 
     if triggered == "reset-btn":
         return []
+
+    if triggered == "combined-search":
+        county_geoids = [v for v in (combined_search or []) if not str(v).startswith("state:")]
+        return county_geoids
 
     if triggered == "scatter-plot":
         if scatter_sel is None:
@@ -339,14 +352,26 @@ def update_selection(reset_clicks, scatter_sel, map_click, parcoords_constraints
 
     if triggered == "map-plot":
         if map_click and map_click.get("points"):
-            pt    = map_click["points"][0]
-            geoid = str(pt.get("location") or (pt.get("customdata") or [None])[0] or "")
-            if geoid:
+            pt       = map_click["points"][0]
+            location = str(pt.get("location") or (pt.get("customdata") or [None])[0] or "")
+            if location:
                 current = [str(g) for g in (current_sel or [])]
-                if geoid in current:
-                    current.remove(geoid)   # toggle off
+                store   = hex_store or {}
+                if location in store:
+                    # Hex click — toggle all counties in this tile
+                    tile_geoids = [str(g) for g in store[location]]
+                    if all(g in current for g in tile_geoids):
+                        current = [g for g in current if g not in tile_geoids]
+                    else:
+                        for g in tile_geoids:
+                            if g not in current:
+                                current.append(g)
                 else:
-                    current.append(geoid)   # toggle on
+                    # County choropleth click — toggle single county
+                    if location in current:
+                        current.remove(location)
+                    else:
+                        current.append(location)
                 return current
         return [str(g) for g in (current_sel or [])]
 
@@ -358,6 +383,82 @@ def update_selection(reset_clicks, scatter_sel, map_click, parcoords_constraints
         return []
 
     return no_update
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Callback: clear county search on reset
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.callback(
+    Output("combined-search", "value"),
+    Input("reset-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def clear_combined_search(_):
+    return None
+
+
+@app.callback(
+    Output("state-dropdown", "value"),
+    Input("combined-search", "value"),
+    prevent_initial_call=True,
+)
+def sync_state_from_combined(vals):
+    state_vals = [v.replace("state:", "") for v in (vals or []) if str(v).startswith("state:")]
+    return state_vals[0] if state_vals else "All"
+
+
+@app.callback(
+    Output("combined-search", "options"),
+    Input("combined-search", "search_value"),
+    State("combined-search", "value"),
+)
+def update_combined_search_options(search_value, current_value):
+    state_opts = [{"label": "— All States —", "value": "state:All"}] + [
+        {"label": s, "value": f"state:{s}"} for s in _data.STATES
+    ]
+
+    df   = _data.COUNTIES
+    name_col  = "County" if "County" in df.columns else "NAME"
+    state_col = "State"  if "State"  in df.columns else None
+
+    def _make_label(row_name, row_state):
+        return f"{row_name}, {row_state}" if row_state else row_name
+
+    # Always keep already-selected counties in options so tags don't disappear
+    selected_opts = []
+    if current_value:
+        sel_geoids = [v for v in current_value if not str(v).startswith("state:")]
+        if sel_geoids and not df.empty:
+            sel_df = df[df["GEOID"].isin(sel_geoids)]
+            for _, r in sel_df.iterrows():
+                lbl = _make_label(
+                    str(r.get(name_col, "")),
+                    str(r.get(state_col, "")) if state_col else "",
+                )
+                selected_opts.append({"label": lbl, "value": str(r["GEOID"])})
+
+    if not search_value or len(search_value) < 1:
+        return state_opts + selected_opts
+
+    # Filter counties whose name contains the search string
+    if df.empty:
+        return state_opts + selected_opts
+
+    sq = search_value.lower()
+    if state_col and state_col in df.columns:
+        labels = df[name_col].fillna("") + ", " + df[state_col].fillna("")
+    else:
+        labels = df[name_col].fillna("")
+
+    seen = {o["value"] for o in selected_opts}
+    county_matches = [
+        {"label": lbl, "value": str(geoid)}
+        for lbl, geoid in zip(labels, df["GEOID"])
+        if sq in lbl.lower() and str(geoid) not in seen
+    ][:50]   # cap at 50 results for performance
+
+    return state_opts + selected_opts + county_matches
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -426,43 +527,99 @@ def update_selection_info(selected_geoids):
     Output("details-panel", "children"),
     Input("map-plot",     "hoverData"),
     Input("scatter-plot", "hoverData"),
+    State("hex-geoid-store", "data"),
     prevent_initial_call=True,
 )
-def update_details(map_hover, scatter_hover):
+def update_details(map_hover, scatter_hover, hex_store):
     triggered = ctx.triggered_id
 
-    geoid = None
+    location = None
     if triggered == "map-plot" and map_hover:
-        pts   = map_hover.get("points", [])
+        pts = map_hover.get("points", [])
         if pts:
-            geoid = pts[0].get("location") or (pts[0].get("customdata") or [None])[0]
+            location = str(pts[0].get("location") or (pts[0].get("customdata") or [None])[0] or "")
     elif triggered == "scatter-plot" and scatter_hover:
         pts = scatter_hover.get("points", [])
         if pts:
             cd = pts[0].get("customdata")
             if cd and len(cd) > 0:
-                geoid = cd[0]
+                location = str(cd[0])
 
-    if not geoid:
+    if not location:
         return html.Small("Hover over a county on the map or scatter plot.", className="text-muted")
 
-    row = _data.COUNTIES[_data.COUNTIES["GEOID"] == str(geoid)]
-    if row.empty:
-        return html.Small(f"GEOID {geoid} not found.", className="text-muted")
+    # ── Hex tile hover ────────────────────────────────────────────────────────
+    store = hex_store or {}
+    if location in store:
+        geoids = [str(g) for g in store[location]]
+        tile_df = _data.COUNTIES[_data.COUNTIES["GEOID"].isin(geoids)]
+        if tile_df.empty:
+            return html.Small("No county data for this hex tile.", className="text-muted")
 
-    row = row.iloc[0]
-    county_name = row.get("County") or row.get("NAME", "—")
-    state_name  = row.get("State", "—")
+        name_col  = "County" if "County" in tile_df.columns else "NAME"
+        state_col = "State"  if "State"  in tile_df.columns else None
+
+        # Single county in tile → show full details exactly like choropleth
+        if len(tile_df) == 1:
+            return _county_detail_div(tile_df.iloc[0], name_col, state_col)
+
+        # Multiple counties → show tile header + per-county rows
+        county_names = (
+            tile_df[name_col].fillna("") + ", " + tile_df[state_col].fillna("")
+            if state_col else tile_df[name_col].fillna("")
+        ).tolist()
+        chips = [html.Span(n, className="parcoords-county-chip") for n in county_names[:8]]
+        if len(county_names) > 8:
+            chips.append(html.Span(f"+{len(county_names)-8} more", className="parcoords-county-chip parcoords-county-more"))
+
+        metric_rows = []
+        for metric, cfg in METRICS.items():
+            if metric not in tile_df.columns:
+                continue
+            col = tile_df[metric].dropna()
+            if col.empty:
+                val_str = "No data"
+            else:
+                mean_v = col.mean()
+                val_str = f"{mean_v:,.3f}  (mean of {len(col)} counties)"
+            metric_rows.append(html.Div(className="detail-row", children=[
+                html.Span(cfg["label"], className="detail-label text-muted"),
+                html.Span(val_str, className="detail-value"),
+            ]))
+
+        return html.Div([
+            html.Div(className="detail-county-name", children=[
+                html.Strong("H3 Hex Tile"),
+                html.Span(f"  {len(geoids)} counties", className="text-muted ms-1"),
+            ]),
+            html.Div(chips, className="d-flex flex-wrap gap-1 mb-1 mt-1"),
+            html.Div(metric_rows, className="detail-metrics mt-1"),
+        ])
+
+    # ── County choropleth hover ────────────────────────────────────────────────
+    row = _data.COUNTIES[_data.COUNTIES["GEOID"] == location]
+    if row.empty:
+        return html.Small("Hover over a county on the map or scatter plot.", className="text-muted")
+
+    name_col  = "County" if "County" in _data.COUNTIES.columns else "NAME"
+    state_col = "State"  if "State"  in _data.COUNTIES.columns else None
+    return _county_detail_div(row.iloc[0], name_col, state_col)
+
+
+def _county_detail_div(row, name_col: str, state_col: str | None) -> html.Div:
+    """Render the metric detail panel for a single county row."""
+    county_name = row.get(name_col) or row.get("NAME", "—")
+    state_name  = row.get(state_col, "—") if state_col else "—"
+    geoid       = row.get("GEOID", "")
 
     items = []
     for metric, cfg in METRICS.items():
         val = row.get(metric, np.nan)
         higher_is_worse = cfg.get("higher_is_worse", True)
         if pd.isna(val):
-            val_str   = "No data"
-            val_class = "text-muted"
+            val_str, val_class = "No data", "text-muted"
         else:
-            val_str  = f"{val:,.3f}"
+            val_str = f"{val:,.3f}"
             col_data = _data.COUNTIES[metric].dropna() if metric in _data.COUNTIES.columns else pd.Series([], dtype=float)
             if len(col_data) > 0:
                 pct_rank = float((col_data < val).sum()) / len(col_data)
@@ -472,12 +629,10 @@ def update_details(map_hover, scatter_hover):
                     val_class = "text-danger" if pct_rank <= 0.25 else ("text-success" if pct_rank >= 0.75 else "")
             else:
                 val_class = ""
-        items.append(
-            html.Div(className="detail-row", children=[
-                html.Span(cfg["label"], className="detail-label text-muted"),
-                html.Span(val_str, className=f"detail-value {val_class}".strip()),
-            ])
-        )
+        items.append(html.Div(className="detail-row", children=[
+            html.Span(cfg["label"], className="detail-label text-muted"),
+            html.Span(val_str, className=f"detail-value {val_class}".strip()),
+        ]))
 
     return html.Div([
         html.Div(className="detail-county-name", children=[

@@ -286,7 +286,23 @@ body {
 .rc-slider-dot-active { border-color: var(--accent) !important; }
 
 /* Navbar */
-.navbar { background: rgba(9,9,11,0.96) !important; backdrop-filter: blur(10px); }
+.navbar { background: rgba(9,9,11,0.96) !important; }
+
+/* Search strip – sits below navbar, allows dropdown to overflow freely */
+.search-strip {
+  background: rgba(17,17,19,0.98);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 1050;
+}
+
+/* Ensure the combined-search dropdown menu is never clipped */
+.combined-search-dropdown { flex: 1; font-size: 12px; }
+.combined-search-dropdown .Select-menu-outer {
+  z-index: 9999 !important;
+  position: absolute !important;
+  top: 100% !important;
+}
 
 /* Alerts */
 .alert { border-radius: var(--radius) !important; }

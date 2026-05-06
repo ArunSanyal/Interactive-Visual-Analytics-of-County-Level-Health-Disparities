@@ -226,6 +226,7 @@ def make_hex_map(
     hex_df: pd.DataFrame,
     metric: str,
     result: ClassifyResult,
+    selected_geoids: list[str] | None = None,
     center: dict | None = None,
     zoom: float = 3.0,
     resolution: int = 4,
@@ -332,6 +333,31 @@ def make_hex_map(
         ))
 
     fig = go.Figure(traces)
+
+    # Highlight hexes that contain at least one selected county
+    if selected_geoids and "geoids" in hex_df.columns:
+        sel_set  = set(selected_geoids)
+        sel_mask = hex_df["geoids"].apply(
+            lambda gs: any(g in sel_set for g in (gs or []))
+        )
+        sel_hex = hex_df[sel_mask].copy()
+        if not sel_hex.empty:
+            fig.add_trace(go.Choroplethmapbox(
+                geojson=hex_geojson,
+                locations=sel_hex["h3_index"],
+                featureidkey="properties.h3_index",
+                z=sel_hex["_class"],
+                colorscale=cs,
+                zmin=1,
+                zmax=k,
+                marker_opacity=1.0,
+                marker_line_width=4.5,
+                marker_line_color="#ffffff",
+                text=sel_hex["_label"],
+                hoverinfo="text",
+                showscale=False,
+                name="Selected",
+            ))
 
     fig.add_annotation(
         text=(

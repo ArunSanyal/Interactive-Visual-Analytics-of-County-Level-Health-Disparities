@@ -35,6 +35,13 @@ def _state_options() -> list[dict]:
     return opts
 
 
+def _combined_search_options() -> list[dict]:
+    """Initial options: states only. Counties are added dynamically via callback as user types."""
+    return [{"label": "— All States —", "value": "state:All"}] + [
+        {"label": s, "value": f"state:{s}"} for s in _data.STATES
+    ]
+
+
 def _stat_pill(number: str, label: str) -> dbc.Col:
     return dbc.Col(
         html.Div([
@@ -189,6 +196,7 @@ def viz_layout() -> html.Div:
         dcc.Store(id="selection-store",             data=[]),
         dcc.Store(id="hover-store",                 data=None),
         dcc.Store(id="parcoords-constraints-store", data={}),
+        dcc.Store(id="hex-geoid-store",             data={}),
         dcc.Download(id="download-csv"),
 
         # ── Top bar ───────────────────────────────────────────────────────────
@@ -212,6 +220,30 @@ def viz_layout() -> html.Div:
             color="dark",
             dark=True,
             className="border-bottom border-secondary",
+        ),
+
+        # ── Search strip (below navbar, not inside it so dropdown can overflow) ─
+        html.Div(
+            dbc.Container([
+                html.Div(
+                    [
+                        html.I(className="bi bi-search me-2 text-muted",
+                               style={"fontSize": "12px"}),
+                        dcc.Dropdown(
+                            id="combined-search",
+                            options=_combined_search_options(),
+                            value=None,
+                            multi=True,
+                            placeholder="Filter by state or search county…",
+                            clearable=True,
+                            className="dash-dropdown combined-search-dropdown",
+                        ),
+                    ],
+                    className="d-flex align-items-center",
+                    style={"width": "440px"},
+                ),
+            ], fluid=True, className="py-1"),
+            className="search-strip",
         ),
 
         # ── Main layout: sidebar + content ───────────────────────────────────
@@ -277,17 +309,18 @@ def viz_layout() -> html.Div:
                             inputClassName="me-1",
                         ),
 
-                        html.Hr(className="divider"),
-                        html.H6("FILTER", className="sidebar-section-title"),
-
-                        html.Label("State Filter", className="ctrl-label"),
+                        # state-dropdown kept hidden so existing callbacks work unchanged
                         dcc.Dropdown(
                             id="state-dropdown",
                             options=_state_options(),
                             value="All",
                             clearable=False,
-                            className="dash-dropdown mb-2",
+                            style={"display": "none"},
                         ),
+
+                        html.Hr(className="divider"),
+                        html.H6("SELECTION", className="sidebar-section-title"),
+
                         dbc.Button(
                             [html.I(className="bi bi-x-circle me-1"), "Reset Selection"],
                             id="reset-btn",
